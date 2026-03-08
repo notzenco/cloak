@@ -20,6 +20,8 @@ pub struct AnalysisResult {
     pub rs: Option<RsAnalysisResult>,
     /// Sample pairs analysis result.
     pub sample_pairs: Option<SamplePairsResult>,
+    /// Shannon entropy per channel.
+    pub entropy: Option<EntropyResult>,
 }
 
 /// RS (Regular-Singular) analysis result.
@@ -46,6 +48,19 @@ pub struct SamplePairsResult {
     pub total_pairs: u64,
     /// Pairs with close values (differ by <= 1).
     pub close_pairs: u64,
+}
+
+/// Shannon entropy analysis result.
+#[derive(Debug, Clone)]
+pub struct EntropyResult {
+    /// Entropy of the red channel (0.0–8.0 bits).
+    pub red: f64,
+    /// Entropy of the green channel (0.0–8.0 bits).
+    pub green: f64,
+    /// Entropy of the blue channel (0.0–8.0 bits).
+    pub blue: f64,
+    /// Average entropy across all channels.
+    pub average: f64,
 }
 
 /// Bit-plane data for a single channel.
@@ -85,6 +100,7 @@ pub fn analyze_image(image_data: &[u8]) -> Result<AnalysisResult> {
 
     let rs = rs_analysis_from_pixels(&pixel_values, width);
     let sample_pairs = sample_pairs_from_pixels(&pixel_values);
+    let entropy = compute_entropy(&pixel_values, pixel_count as usize);
 
     Ok(AnalysisResult {
         chi_square,
@@ -95,6 +111,7 @@ pub fn analyze_image(image_data: &[u8]) -> Result<AnalysisResult> {
         height,
         rs: Some(rs),
         sample_pairs: Some(sample_pairs),
+        entropy: Some(entropy),
     })
 }
 
@@ -344,6 +361,47 @@ fn sample_pairs_from_pixels(pixels: &[[u8; 3]]) -> SamplePairsResult {
     }
 }
 
+/// Compute Shannon entropy per channel.
+fn compute_entropy(pixels: &[[u8; 3]], pixel_count: usize) -> EntropyResult {
+    if pixel_count == 0 {
+        return EntropyResult {
+            red: 0.0,
+            green: 0.0,
+            blue: 0.0,
+            average: 0.0,
+        };
+    }
+
+    let mut histograms = [[0u64; 256]; 3];
+
+    for pixel in pixels {
+        for channel in 0..3 {
+            histograms[channel][pixel[channel] as usize] += 1;
+        }
+    }
+
+    let n = pixel_count as f64;
+    let mut entropies = [0.0f64; 3];
+
+    for (ch, hist) in histograms.iter().enumerate() {
+        let mut h = 0.0;
+        for &count in hist {
+            if count > 0 {
+                let p = count as f64 / n;
+                h -= p * p.log2();
+            }
+        }
+        entropies[ch] = h;
+    }
+
+    EntropyResult {
+        red: entropies[0],
+        green: entropies[1],
+        blue: entropies[2],
+        average: (entropies[0] + entropies[1] + entropies[2]) / 3.0,
+    }
+}
+
 /// Chi-square test for LSB pairs.
 fn chi_square_lsb(histogram: &[u64; 256]) -> (f64, usize) {
     let mut chi2 = 0.0;
@@ -511,5 +569,49 @@ mod tests {
         let result = analyze_image(&stego).unwrap();
         let sp = result.sample_pairs.unwrap();
         assert!(sp.total_pairs > 0);
+    }
+
+    #[test]
+    fn entropy_uniform_image_zero() {
+        // All pixels same color → entropy 0
+        let img = RgbaImage::from_fn(16, 16, |_, _| image::Rgba([128, 128, 128, 255]));
+        let mut buf = Vec::new();
+        img.write_to(&mut Cursor::new(&mut buf), ImageFormat::Png)
+            .unwrap();
+
+        let result = analyze_image(&buf).unwrap();
+        let ent = result.entropy.unwrap();
+        assert!((ent.red - 0.0).abs() < 0.001);
+        assert!((ent.green - 0.0).abs() < 0.001);
+        assert!((ent.blue - 0.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn entropy_natural_image_range() {
+        let data = make_test_png(64, 64);
+        let result = analyze_image(&data).unwrap();
+        let ent = result.entropy.unwrap();
+        // Pseudo-random pattern should have moderate-high entropy
+        assert!(ent.average > 3.0 && ent.average <= 8.0,
+            "entropy {} out of expected range", ent.average);
+    }
+
+    #[test]
+    fn entropy_random_image_high() {
+        // Random pixel values → entropy near 8.0
+        use rand::RngCore;
+        let mut rng = rand::thread_rng();
+        let img = RgbaImage::from_fn(64, 64, |_, _| {
+            let mut bytes = [0u8; 3];
+            rng.fill_bytes(&mut bytes);
+            image::Rgba([bytes[0], bytes[1], bytes[2], 255])
+        });
+        let mut buf = Vec::new();
+        img.write_to(&mut Cursor::new(&mut buf), ImageFormat::Png)
+            .unwrap();
+
+        let result = analyze_image(&buf).unwrap();
+        let ent = result.entropy.unwrap();
+        assert!(ent.average > 7.0, "entropy {} expected > 7.0", ent.average);
     }
 }

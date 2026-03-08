@@ -413,6 +413,24 @@ fn draw_analysis(frame: &mut ratatui::Frame, state: &AppState, area: Rect) {
         ]));
     }
 
+    if let Some(ent) = &a.entropy {
+        text.push(Line::from(""));
+        text.push(Line::from(vec![
+            Span::styled("Entropy (bits):       ", Style::default().fg(Color::DarkGray)),
+            Span::styled("R: ", Style::default().fg(Color::Red)),
+            Span::raw(format!("{:.3}", ent.red)),
+            Span::raw("  "),
+            Span::styled("G: ", Style::default().fg(Color::Green)),
+            Span::raw(format!("{:.3}", ent.green)),
+            Span::raw("  "),
+            Span::styled("B: ", Style::default().fg(Color::Blue)),
+            Span::raw(format!("{:.3}", ent.blue)),
+            Span::raw("  "),
+            Span::styled("Avg: ", Style::default().fg(Color::DarkGray)),
+            Span::raw(format!("{:.3}", ent.average)),
+        ]));
+    }
+
     text.extend([
         Line::from(""),
         Line::from(Span::styled(

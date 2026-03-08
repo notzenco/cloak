@@ -256,6 +256,13 @@ fn run() -> Result<()> {
                     println!("  Total pairs: {}  Close pairs: {}", sp.total_pairs, sp.close_pairs);
                     println!("  Estimated rate: {:.4}", sp.estimated_rate);
                 }
+
+                if let Some(ent) = &analysis.entropy {
+                    println!();
+                    println!("Shannon Entropy (bits):");
+                    println!("  Red:   {:.4}  Green: {:.4}  Blue:  {:.4}", ent.red, ent.green, ent.blue);
+                    println!("  Average: {:.4}", ent.average);
+                }
             }
         }
 
