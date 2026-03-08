@@ -1,4 +1,5 @@
 pub mod bmp;
+pub mod lsb;
 pub mod png;
 
 use crate::CloakError;
