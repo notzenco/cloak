@@ -2,6 +2,7 @@ pub mod bmp;
 pub mod jpeg;
 pub mod lsb;
 pub mod png;
+pub mod webp;
 
 use crate::CloakError;
 
@@ -11,6 +12,7 @@ pub enum ImageFormat {
     Png,
     Bmp,
     Jpeg,
+    WebP,
 }
 
 impl ImageFormat {
@@ -26,6 +28,9 @@ impl ImageFormat {
         if data.len() >= 3 && data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF {
             return Ok(Self::Jpeg);
         }
+        if data.len() >= 12 && &data[..4] == b"RIFF" && &data[8..12] == b"WEBP" {
+            return Ok(Self::WebP);
+        }
 
         // Fall back to extension
         if let Some(path) = path {
@@ -39,6 +44,9 @@ impl ImageFormat {
             if lower.ends_with(".jpg") || lower.ends_with(".jpeg") {
                 return Ok(Self::Jpeg);
             }
+            if lower.ends_with(".webp") {
+                return Ok(Self::WebP);
+            }
         }
 
         Err(CloakError::UnsupportedFormat(
@@ -51,7 +59,7 @@ impl ImageFormat {
         match self {
             Self::Png => Self::Png,
             Self::Bmp => Self::Bmp,
-            Self::Jpeg => Self::Png,
+            Self::Jpeg | Self::WebP => Self::Png,
         }
     }
 
@@ -61,11 +69,12 @@ impl ImageFormat {
             Self::Png => ".png",
             Self::Bmp => ".bmp",
             Self::Jpeg => ".jpg",
+            Self::WebP => ".webp",
         }
     }
 
     /// Whether this format is lossy (stego output will differ from input format).
     pub fn is_lossy(&self) -> bool {
-        matches!(self, Self::Jpeg)
+        matches!(self, Self::Jpeg | Self::WebP)
     }
 }

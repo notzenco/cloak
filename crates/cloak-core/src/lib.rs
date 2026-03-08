@@ -20,6 +20,7 @@ pub fn embed(cover: &[u8], data: &[u8], passphrase: &str, path: Option<&str>) ->
         ImageFormat::Png => formats::png::PngCodec.encode(cover, &encrypted),
         ImageFormat::Bmp => formats::bmp::BmpCodec.encode(cover, &encrypted),
         ImageFormat::Jpeg => formats::jpeg::JpegCodec.encode(cover, &encrypted),
+        ImageFormat::WebP => formats::webp::WebpCodec.encode(cover, &encrypted),
     }
 }
 
@@ -29,9 +30,9 @@ pub fn extract(stego: &[u8], passphrase: &str, path: Option<&str>) -> Result<Vec
     let encrypted = match format {
         ImageFormat::Png => formats::png::PngCodec.decode(stego)?,
         ImageFormat::Bmp => formats::bmp::BmpCodec.decode(stego)?,
-        ImageFormat::Jpeg => {
+        ImageFormat::Jpeg | ImageFormat::WebP => {
             return Err(CloakError::UnsupportedFormat(
-                "stego images from JPEG covers are PNG — extract from the PNG output".into(),
+                "stego images from lossy covers are PNG — extract from the PNG output".into(),
             ));
         }
     };
@@ -45,6 +46,7 @@ pub fn capacity(cover: &[u8], path: Option<&str>) -> Result<usize> {
         ImageFormat::Png => formats::png::PngCodec.capacity(cover)?,
         ImageFormat::Bmp => formats::bmp::BmpCodec.capacity(cover)?,
         ImageFormat::Jpeg => formats::jpeg::JpegCodec.capacity(cover)?,
+        ImageFormat::WebP => formats::webp::WebpCodec.capacity(cover)?,
     };
     Ok(raw_capacity.saturating_sub(crypto::overhead()))
 }
