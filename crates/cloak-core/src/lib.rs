@@ -19,6 +19,7 @@ pub fn embed(cover: &[u8], data: &[u8], passphrase: &str, path: Option<&str>) ->
     match format {
         ImageFormat::Png => formats::png::PngCodec.encode(cover, &encrypted),
         ImageFormat::Bmp => formats::bmp::BmpCodec.encode(cover, &encrypted),
+        ImageFormat::Jpeg => formats::jpeg::JpegCodec.encode(cover, &encrypted),
     }
 }
 
@@ -28,6 +29,11 @@ pub fn extract(stego: &[u8], passphrase: &str, path: Option<&str>) -> Result<Vec
     let encrypted = match format {
         ImageFormat::Png => formats::png::PngCodec.decode(stego)?,
         ImageFormat::Bmp => formats::bmp::BmpCodec.decode(stego)?,
+        ImageFormat::Jpeg => {
+            return Err(CloakError::UnsupportedFormat(
+                "stego images from JPEG covers are PNG — extract from the PNG output".into(),
+            ));
+        }
     };
     crypto::decrypt(&encrypted, passphrase)
 }
@@ -38,6 +44,7 @@ pub fn capacity(cover: &[u8], path: Option<&str>) -> Result<usize> {
     let raw_capacity = match format {
         ImageFormat::Png => formats::png::PngCodec.capacity(cover)?,
         ImageFormat::Bmp => formats::bmp::BmpCodec.capacity(cover)?,
+        ImageFormat::Jpeg => formats::jpeg::JpegCodec.capacity(cover)?,
     };
     Ok(raw_capacity.saturating_sub(crypto::overhead()))
 }

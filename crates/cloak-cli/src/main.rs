@@ -106,6 +106,28 @@ fn make_progress(msg: &str) -> ProgressBar {
     pb
 }
 
+/// If the input format is lossy, correct the output path to use the lossless output extension.
+fn resolve_output_path(input_format: cloak_core::ImageFormat, output: &std::path::Path) -> PathBuf {
+    if input_format.is_lossy() {
+        let output_format = input_format.output_format();
+        let out_ext = output_format.extension();
+        let out_str = output.to_string_lossy().to_lowercase();
+        // If output has a lossy extension, correct it
+        if out_str.ends_with(".jpg") || out_str.ends_with(".jpeg") || out_str.ends_with(".webp") {
+            let stem = output.file_stem().unwrap_or_default();
+            let parent = output.parent().unwrap_or(std::path::Path::new("."));
+            let corrected = parent.join(format!("{}{}", stem.to_string_lossy(), out_ext));
+            eprintln!(
+                "Warning: lossy input format; output will be {} — saving as {}",
+                out_ext.trim_start_matches('.').to_uppercase(),
+                corrected.display()
+            );
+            return corrected;
+        }
+    }
+    output.to_path_buf()
+}
+
 fn main() {
     if let Err(e) = run() {
         eprintln!("error: {e:#}");
@@ -131,6 +153,9 @@ fn run() -> Result<()> {
                 .with_context(|| format!("failed to read data file: {}", data.display()))?;
 
             let path_str = input.to_string_lossy();
+            let format = cloak_core::ImageFormat::detect(&cover, Some(&path_str))
+                .context("format detection failed")?;
+
             let cap = cloak_core::capacity(&cover, Some(&path_str))
                 .context("failed to calculate capacity")?;
 
@@ -139,6 +164,16 @@ fn run() -> Result<()> {
                     "payload ({} bytes) exceeds capacity ({} bytes)",
                     payload.len(),
                     cap,
+                );
+            }
+
+            let output = resolve_output_path(format, &output);
+
+            if format.is_lossy() {
+                eprintln!(
+                    "Note: {} is a lossy format; stego output will be {}",
+                    path_str,
+                    format.output_format().extension().trim_start_matches('.').to_uppercase()
                 );
             }
 
