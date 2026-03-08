@@ -376,6 +376,7 @@ dependencies = [
  "clap",
  "cloak-core",
  "cloak-tui",
+ "glob",
  "image",
  "indicatif",
  "rpassword",
@@ -389,6 +390,7 @@ dependencies = [
  "chacha20poly1305",
  "image",
  "rand 0.8.5",
+ "rand_chacha 0.3.1",
  "thiserror",
 ]
 
@@ -736,6 +738,12 @@ dependencies = [
  "color_quant",
  "weezl",
 ]
+
+[[package]]
+name = "glob"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
 
 [[package]]
 name = "half"

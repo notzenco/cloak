@@ -18,3 +18,4 @@ rpassword = { workspace = true }
 indicatif = { workspace = true }
 anyhow = { workspace = true }
 image = { workspace = true }
+glob = { workspace = true }
