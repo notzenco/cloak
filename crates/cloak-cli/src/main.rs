@@ -241,6 +241,21 @@ fn run() -> Result<()> {
                 } else {
                     println!("Result:     No strong evidence of hidden data");
                 }
+
+                if let Some(rs) = &analysis.rs {
+                    println!();
+                    println!("RS Analysis:");
+                    println!("  R_m:  {:.4}  S_m:  {:.4}", rs.r_m, rs.s_m);
+                    println!("  R-m:  {:.4}  S-m:  {:.4}", rs.r_neg_m, rs.s_neg_m);
+                    println!("  Estimated rate: {:.4}", rs.estimated_rate);
+                }
+
+                if let Some(sp) = &analysis.sample_pairs {
+                    println!();
+                    println!("Sample Pairs:");
+                    println!("  Total pairs: {}  Close pairs: {}", sp.total_pairs, sp.close_pairs);
+                    println!("  Estimated rate: {:.4}", sp.estimated_rate);
+                }
             }
         }
 

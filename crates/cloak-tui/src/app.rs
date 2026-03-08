@@ -352,7 +352,7 @@ fn draw_analysis(frame: &mut ratatui::Frame, state: &AppState, area: Rect) {
 
     let confidence = ((1.0 - a.p_value) * 100.0).min(99.99);
 
-    let text = vec![
+    let mut text = vec![
         Line::from(""),
         Line::from(vec![
             Span::styled(
@@ -381,6 +381,39 @@ fn draw_analysis(frame: &mut ratatui::Frame, state: &AppState, area: Rect) {
             verdict,
         ]),
         Line::from(""),
+    ];
+
+    if let Some(rs) = &a.rs {
+        text.push(Line::from(vec![
+            Span::styled("RS Analysis Rate:     ", Style::default().fg(Color::DarkGray)),
+            Span::raw(format!("{:.4}", rs.estimated_rate)),
+        ]));
+        text.push(Line::from(vec![
+            Span::styled("  R_m: ", Style::default().fg(Color::DarkGray)),
+            Span::raw(format!("{:.4}", rs.r_m)),
+            Span::styled("  S_m: ", Style::default().fg(Color::DarkGray)),
+            Span::raw(format!("{:.4}", rs.s_m)),
+            Span::styled("  R-m: ", Style::default().fg(Color::DarkGray)),
+            Span::raw(format!("{:.4}", rs.r_neg_m)),
+            Span::styled("  S-m: ", Style::default().fg(Color::DarkGray)),
+            Span::raw(format!("{:.4}", rs.s_neg_m)),
+        ]));
+    }
+
+    if let Some(sp) = &a.sample_pairs {
+        text.push(Line::from(vec![
+            Span::styled("Sample Pairs Rate:    ", Style::default().fg(Color::DarkGray)),
+            Span::raw(format!("{:.4}", sp.estimated_rate)),
+        ]));
+        text.push(Line::from(vec![
+            Span::styled("  Total: ", Style::default().fg(Color::DarkGray)),
+            Span::raw(format!("{}", sp.total_pairs)),
+            Span::styled("  Close: ", Style::default().fg(Color::DarkGray)),
+            Span::raw(format!("{}", sp.close_pairs)),
+        ]));
+    }
+
+    text.extend([
         Line::from(""),
         Line::from(Span::styled(
             "The chi-square test examines whether LSB values show",
@@ -390,7 +423,7 @@ fn draw_analysis(frame: &mut ratatui::Frame, state: &AppState, area: Rect) {
             "patterns inconsistent with natural image data.",
             Style::default().fg(Color::DarkGray),
         )),
-    ];
+    ]);
 
     let block = Block::default()
         .borders(Borders::ALL)
