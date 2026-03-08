@@ -5,7 +5,9 @@ resolver = "2"
 [workspace.package]
 edition = "2024"
 license = "MIT"
-repository = "https://github.com/cloak-stego/cloak"
+repository = "https://github.com/notzenco/cloak"
+homepage = "https://github.com/notzenco/cloak"
+documentation = "https://docs.rs/cloak-core"
 
 [workspace.dependencies]
 cloak-core = { path = "crates/cloak-core" }
