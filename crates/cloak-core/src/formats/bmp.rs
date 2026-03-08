@@ -3,8 +3,8 @@ use std::io::Cursor;
 use image::ImageFormat;
 
 use super::lsb::{self, LsbParams};
-use crate::traits::{Capacity, Decoder, Encoder};
 use crate::Result;
+use crate::traits::{Capacity, Decoder, Encoder};
 
 /// LSB steganography for BMP images.
 #[derive(Default)]
@@ -98,7 +98,10 @@ mod tests {
         let payload = vec![0xAA; cap + 1];
 
         let result = codec.encode(&cover, &payload);
-        assert!(matches!(result, Err(crate::CloakError::PayloadTooLarge { .. })));
+        assert!(matches!(
+            result,
+            Err(crate::CloakError::PayloadTooLarge { .. })
+        ));
     }
 
     #[test]

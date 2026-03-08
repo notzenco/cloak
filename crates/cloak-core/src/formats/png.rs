@@ -3,8 +3,8 @@ use std::io::Cursor;
 use image::ImageFormat;
 
 use super::lsb::{self, LsbParams};
-use crate::traits::{Capacity, Decoder, Encoder};
 use crate::Result;
+use crate::traits::{Capacity, Decoder, Encoder};
 
 /// LSB steganography for PNG images.
 #[derive(Default)]
@@ -110,7 +110,10 @@ mod tests {
         let payload = vec![0xAA; cap + 1];
 
         let result = codec.encode(&cover, &payload);
-        assert!(matches!(result, Err(crate::CloakError::PayloadTooLarge { .. })));
+        assert!(matches!(
+            result,
+            Err(crate::CloakError::PayloadTooLarge { .. })
+        ));
     }
 
     #[test]
@@ -142,7 +145,10 @@ mod tests {
     #[test]
     fn multi_bit_roundtrip_2() {
         let cover = make_test_png(32, 32);
-        let params = LsbParams { bit_depth: 2 };
+        let params = LsbParams {
+            bit_depth: 2,
+            ..Default::default()
+        };
         let codec = PngCodec::new(params);
 
         let cap = codec.capacity(&cover).unwrap();
@@ -157,7 +163,10 @@ mod tests {
     #[test]
     fn multi_bit_roundtrip_3() {
         let cover = make_test_png(32, 32);
-        let params = LsbParams { bit_depth: 3 };
+        let params = LsbParams {
+            bit_depth: 3,
+            ..Default::default()
+        };
         let codec = PngCodec::new(params);
 
         let cap = codec.capacity(&cover).unwrap();
@@ -172,7 +181,10 @@ mod tests {
     #[test]
     fn multi_bit_roundtrip_4() {
         let cover = make_test_png(32, 32);
-        let params = LsbParams { bit_depth: 4 };
+        let params = LsbParams {
+            bit_depth: 4,
+            ..Default::default()
+        };
         let codec = PngCodec::new(params);
 
         let cap = codec.capacity(&cover).unwrap();
@@ -187,20 +199,40 @@ mod tests {
     #[test]
     fn capacity_scales_with_bit_depth() {
         let cover = make_test_png(10, 10);
-        let cap1 = PngCodec::new(LsbParams { bit_depth: 1 }).capacity(&cover).unwrap();
-        let cap2 = PngCodec::new(LsbParams { bit_depth: 2 }).capacity(&cover).unwrap();
-        let cap4 = PngCodec::new(LsbParams { bit_depth: 4 }).capacity(&cover).unwrap();
+        let cap1 = PngCodec::new(LsbParams {
+            bit_depth: 1,
+            ..Default::default()
+        })
+        .capacity(&cover)
+        .unwrap();
+        let cap2 = PngCodec::new(LsbParams {
+            bit_depth: 2,
+            ..Default::default()
+        })
+        .capacity(&cover)
+        .unwrap();
+        let cap4 = PngCodec::new(LsbParams {
+            bit_depth: 4,
+            ..Default::default()
+        })
+        .capacity(&cover)
+        .unwrap();
 
         assert!(cap2 > cap1);
         assert!(cap4 > cap2);
-        // Roughly: cap2 ≈ 2*cap1, cap4 ≈ 4*cap1 (minus the fixed 32-bit header)
     }
 
     #[test]
     fn wrong_bit_depth_fails_extract() {
         let cover = make_test_png(32, 32);
-        let embed_codec = PngCodec::new(LsbParams { bit_depth: 2 });
-        let extract_codec = PngCodec::new(LsbParams { bit_depth: 1 });
+        let embed_codec = PngCodec::new(LsbParams {
+            bit_depth: 2,
+            ..Default::default()
+        });
+        let extract_codec = PngCodec::new(LsbParams {
+            bit_depth: 1,
+            ..Default::default()
+        });
 
         let payload = b"multi-bit test";
         let stego = embed_codec.encode(&cover, payload).unwrap();

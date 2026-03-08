@@ -80,9 +80,12 @@ impl AppState {
         let (width, height) = img.dimensions();
         let analysis_result = analysis::analyze_image(&image_data)?;
         let bit_plane = analysis::extract_bit_plane(&image_data, 0, 0)?;
-        let capacity =
-            cloak_core::capacity(&image_data, Some(&filename), &cloak_core::EmbedOptions::default())
-                .unwrap_or(0);
+        let capacity = cloak_core::capacity(
+            &image_data,
+            Some(&filename),
+            &cloak_core::EmbedOptions::default(),
+        )
+        .unwrap_or(0);
 
         Ok(Self {
             image_data,
@@ -387,7 +390,10 @@ fn draw_analysis(frame: &mut ratatui::Frame, state: &AppState, area: Rect) {
 
     if let Some(rs) = &a.rs {
         text.push(Line::from(vec![
-            Span::styled("RS Analysis Rate:     ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                "RS Analysis Rate:     ",
+                Style::default().fg(Color::DarkGray),
+            ),
             Span::raw(format!("{:.4}", rs.estimated_rate)),
         ]));
         text.push(Line::from(vec![
@@ -404,7 +410,10 @@ fn draw_analysis(frame: &mut ratatui::Frame, state: &AppState, area: Rect) {
 
     if let Some(sp) = &a.sample_pairs {
         text.push(Line::from(vec![
-            Span::styled("Sample Pairs Rate:    ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                "Sample Pairs Rate:    ",
+                Style::default().fg(Color::DarkGray),
+            ),
             Span::raw(format!("{:.4}", sp.estimated_rate)),
         ]));
         text.push(Line::from(vec![
@@ -418,7 +427,10 @@ fn draw_analysis(frame: &mut ratatui::Frame, state: &AppState, area: Rect) {
     if let Some(ent) = &a.entropy {
         text.push(Line::from(""));
         text.push(Line::from(vec![
-            Span::styled("Entropy (bits):       ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                "Entropy (bits):       ",
+                Style::default().fg(Color::DarkGray),
+            ),
             Span::styled("R: ", Style::default().fg(Color::Red)),
             Span::raw(format!("{:.3}", ent.red)),
             Span::raw("  "),

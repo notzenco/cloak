@@ -39,18 +39,14 @@ pub enum PixelOrder {
 /// for a Fisher-Yates shuffle.
 pub fn generate_permutation(passphrase: &str, n: usize) -> Vec<usize> {
     use argon2::Argon2;
+    use rand::SeedableRng;
     use rand::seq::SliceRandom;
     use rand_chacha::ChaCha20Rng;
-    use rand::SeedableRng;
 
     // Derive 32-byte seed from passphrase with a distinct salt
     let mut seed = [0u8; 32];
     Argon2::default()
-        .hash_password_into(
-            passphrase.as_bytes(),
-            b"cloak-permutation",
-            &mut seed,
-        )
+        .hash_password_into(passphrase.as_bytes(), b"cloak-permutation", &mut seed)
         .expect("argon2 key derivation failed");
 
     let mut rng = ChaCha20Rng::from_seed(seed);

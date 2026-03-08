@@ -3,8 +3,8 @@ use std::io::Cursor;
 use image::ImageFormat;
 
 use super::lsb::{self, LsbParams};
-use crate::traits::{Capacity, Encoder};
 use crate::Result;
+use crate::traits::{Capacity, Encoder};
 
 /// WebP cover image support.
 ///

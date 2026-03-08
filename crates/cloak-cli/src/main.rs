@@ -203,10 +203,7 @@ fn make_progress(msg: &str) -> ProgressBar {
     pb
 }
 
-fn resolve_output_path(
-    input_format: cloak_core::ImageFormat,
-    output: &str,
-) -> String {
+fn resolve_output_path(input_format: cloak_core::ImageFormat, output: &str) -> String {
     if output == "-" {
         return output.to_string();
     }
@@ -214,7 +211,10 @@ fn resolve_output_path(
         let output_format = input_format.output_format();
         let out_ext = output_format.extension();
         let out_lower = output.to_lowercase();
-        if out_lower.ends_with(".jpg") || out_lower.ends_with(".jpeg") || out_lower.ends_with(".webp") {
+        if out_lower.ends_with(".jpg")
+            || out_lower.ends_with(".jpeg")
+            || out_lower.ends_with(".webp")
+        {
             let path = std::path::Path::new(output);
             let stem = path.file_stem().unwrap_or_default();
             let parent = path.parent().unwrap_or(std::path::Path::new("."));
@@ -282,7 +282,11 @@ fn run() -> Result<()> {
             let cover = read_input(&input)?;
             let payload = read_input(&data)?;
 
-            let path_hint = if input == "-" { None } else { Some(input.as_str()) };
+            let path_hint = if input == "-" {
+                None
+            } else {
+                Some(input.as_str())
+            };
             let format = cloak_core::ImageFormat::detect(&cover, path_hint)
                 .context("format detection failed")?;
 
@@ -317,9 +321,8 @@ fn run() -> Result<()> {
                 None
             };
 
-            let stego =
-                cloak_core::embed(&cover, &payload, &passphrase, path_hint, &options)
-                    .context("embedding failed")?;
+            let stego = cloak_core::embed(&cover, &payload, &passphrase, path_hint, &options)
+                .context("embedding failed")?;
 
             if let Some(pb) = pb {
                 pb.finish_with_message("Embedding complete");
@@ -353,7 +356,11 @@ fn run() -> Result<()> {
                 None
             };
 
-            let path_hint = if input == "-" { None } else { Some(input.as_str()) };
+            let path_hint = if input == "-" {
+                None
+            } else {
+                Some(input.as_str())
+            };
             let data = cloak_core::extract(&stego, &passphrase, path_hint, &options)
                 .context("extraction failed")?;
 
@@ -487,8 +494,9 @@ fn run() -> Result<()> {
                 randomized: randomize,
             };
 
-            fs::create_dir_all(&output_dir)
-                .with_context(|| format!("failed to create output dir: {}", output_dir.display()))?;
+            fs::create_dir_all(&output_dir).with_context(|| {
+                format!("failed to create output dir: {}", output_dir.display())
+            })?;
 
             let pattern = format!("{}/*", input_dir.display());
             let image_files: Vec<PathBuf> = glob::glob(&pattern)
@@ -512,10 +520,7 @@ fn run() -> Result<()> {
             let mut failed = 0;
 
             for image_path in &image_files {
-                let stem = image_path
-                    .file_stem()
-                    .unwrap_or_default()
-                    .to_string_lossy();
+                let stem = image_path.file_stem().unwrap_or_default().to_string_lossy();
                 pb.set_message(stem.to_string());
 
                 let data_pattern = format!("{}/{}.*", data_dir.display(), stem);
@@ -607,8 +612,9 @@ fn run() -> Result<()> {
                 randomized: randomize,
             };
 
-            fs::create_dir_all(&output_dir)
-                .with_context(|| format!("failed to create output dir: {}", output_dir.display()))?;
+            fs::create_dir_all(&output_dir).with_context(|| {
+                format!("failed to create output dir: {}", output_dir.display())
+            })?;
 
             let pattern = format!("{}/*", input_dir.display());
             let stego_files: Vec<PathBuf> = glob::glob(&pattern)
@@ -632,10 +638,7 @@ fn run() -> Result<()> {
             let mut failed = 0;
 
             for stego_path in &stego_files {
-                let stem = stego_path
-                    .file_stem()
-                    .unwrap_or_default()
-                    .to_string_lossy();
+                let stem = stego_path.file_stem().unwrap_or_default().to_string_lossy();
                 pb.set_message(stem.to_string());
 
                 let stego = match fs::read(stego_path) {

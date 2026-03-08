@@ -592,8 +592,11 @@ mod tests {
         let result = analyze_image(&data).unwrap();
         let ent = result.entropy.unwrap();
         // Pseudo-random pattern should have moderate-high entropy
-        assert!(ent.average > 3.0 && ent.average <= 8.0,
-            "entropy {} out of expected range", ent.average);
+        assert!(
+            ent.average > 3.0 && ent.average <= 8.0,
+            "entropy {} out of expected range",
+            ent.average
+        );
     }
 
     #[test]

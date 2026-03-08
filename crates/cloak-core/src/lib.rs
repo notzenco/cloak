@@ -24,9 +24,10 @@ impl EmbedOptions {
     fn lsb_params(&self, passphrase: Option<&str>, pixel_count: usize) -> LsbParams {
         let pixel_order = if self.randomized {
             let passphrase = passphrase.expect("passphrase required for randomized mode");
-            formats::lsb::PixelOrder::Randomized(
-                formats::lsb::generate_permutation(passphrase, pixel_count),
-            )
+            formats::lsb::PixelOrder::Randomized(formats::lsb::generate_permutation(
+                passphrase,
+                pixel_count,
+            ))
         } else {
             formats::lsb::PixelOrder::Sequential
         };
