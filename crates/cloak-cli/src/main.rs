@@ -37,6 +37,10 @@ enum Command {
         /// Bits per channel (1-4). Higher = more capacity, more visible artifacts.
         #[arg(long, default_value = "1", value_parser = clap::value_parser!(u8).range(1..=4))]
         bit_depth: u8,
+
+        /// Randomize pixel traversal order (improves anti-steganalysis)
+        #[arg(long)]
+        randomize: bool,
     },
 
     /// Extract hidden data from a stego image
@@ -56,6 +60,10 @@ enum Command {
         /// Bits per channel (must match embed setting)
         #[arg(long, default_value = "1", value_parser = clap::value_parser!(u8).range(1..=4))]
         bit_depth: u8,
+
+        /// Must match the --randomize flag used during embedding
+        #[arg(long)]
+        randomize: bool,
     },
 
     /// Analyze an image for steganographic content
@@ -156,9 +164,13 @@ fn run() -> Result<()> {
             output,
             passphrase,
             bit_depth,
+            randomize,
         } => {
             let passphrase = get_passphrase(passphrase, true)?;
-            let options = cloak_core::EmbedOptions { bit_depth };
+            let options = cloak_core::EmbedOptions {
+                bit_depth,
+                randomized: randomize,
+            };
 
             let cover = fs::read(&input)
                 .with_context(|| format!("failed to read cover image: {}", input.display()))?;
@@ -207,9 +219,13 @@ fn run() -> Result<()> {
             output,
             passphrase,
             bit_depth,
+            randomize,
         } => {
             let passphrase = get_passphrase(passphrase, false)?;
-            let options = cloak_core::EmbedOptions { bit_depth };
+            let options = cloak_core::EmbedOptions {
+                bit_depth,
+                randomized: randomize,
+            };
 
             let stego = fs::read(&input)
                 .with_context(|| format!("failed to read stego image: {}", input.display()))?;
@@ -294,7 +310,10 @@ fn run() -> Result<()> {
                 .with_context(|| format!("failed to read image: {}", input.display()))?;
 
             let path_str = input.to_string_lossy();
-            let options = cloak_core::EmbedOptions { bit_depth };
+            let options = cloak_core::EmbedOptions {
+                bit_depth,
+                ..Default::default()
+            };
             let cap = cloak_core::capacity(&data, Some(&path_str), &options)
                 .context("capacity calculation failed")?;
 
