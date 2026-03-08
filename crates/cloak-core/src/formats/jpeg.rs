@@ -2,20 +2,32 @@ use std::io::Cursor;
 
 use image::ImageFormat;
 
-use super::lsb;
+use super::lsb::{self, LsbParams};
 use crate::traits::{Capacity, Encoder};
 use crate::Result;
 
 /// JPEG cover image support.
 ///
 /// JPEG is lossy, so the stego output is PNG (lossless) to preserve LSBs.
-/// Extraction uses `PngCodec` since the output format is PNG.
-pub struct JpegCodec;
+#[derive(Default)]
+pub struct JpegCodec {
+    pub params: LsbParams,
+}
+
+impl JpegCodec {
+    pub fn new(params: LsbParams) -> Self {
+        Self { params }
+    }
+}
 
 impl Capacity for JpegCodec {
     fn capacity(&self, cover: &[u8]) -> Result<usize> {
         let img = image::load_from_memory(cover)?;
-        Ok(lsb::max_payload_bytes(img.width(), img.height()))
+        Ok(lsb::max_payload_bytes(
+            img.width(),
+            img.height(),
+            self.params.bit_depth,
+        ))
     }
 }
 
@@ -24,9 +36,8 @@ impl Encoder for JpegCodec {
         let img = image::load_from_memory(cover)?;
         let mut rgba = img.to_rgba8();
 
-        lsb::embed_lsb(&mut rgba, payload)?;
+        lsb::embed_lsb(&mut rgba, payload, &self.params)?;
 
-        // Encode as PNG to preserve LSBs (JPEG would destroy them)
         let mut output = Vec::new();
         rgba.write_to(&mut Cursor::new(&mut output), ImageFormat::Png)?;
         Ok(output)
@@ -57,11 +68,10 @@ mod tests {
     fn jpeg_to_png_roundtrip() {
         let cover = make_test_jpeg(64, 64);
         let payload = b"JPEG steganography!";
-        let jpeg_codec = JpegCodec;
-        let png_codec = PngCodec;
+        let jpeg_codec = JpegCodec::default();
+        let png_codec = PngCodec::default();
 
         let stego = jpeg_codec.encode(&cover, payload).unwrap();
-        // Output is PNG, so extract with PngCodec
         let extracted = png_codec.decode(&stego).unwrap();
 
         assert_eq!(extracted, payload);
@@ -70,7 +80,7 @@ mod tests {
     #[test]
     fn jpeg_capacity() {
         let cover = make_test_jpeg(10, 10);
-        let codec = JpegCodec;
+        let codec = JpegCodec::default();
 
         let cap = codec.capacity(&cover).unwrap();
         assert_eq!(cap, 33);
@@ -79,13 +89,11 @@ mod tests {
     #[test]
     fn jpeg_format_detection() {
         let cover = make_test_jpeg(4, 4);
-        // JPEG magic bytes: FF D8 FF
         assert_eq!(cover[0], 0xFF);
         assert_eq!(cover[1], 0xD8);
         assert_eq!(cover[2], 0xFF);
 
-        let format =
-            crate::formats::ImageFormat::detect(&cover, None).unwrap();
+        let format = crate::formats::ImageFormat::detect(&cover, None).unwrap();
         assert_eq!(format, crate::formats::ImageFormat::Jpeg);
     }
 

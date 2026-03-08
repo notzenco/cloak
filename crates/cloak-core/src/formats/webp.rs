@@ -2,20 +2,32 @@ use std::io::Cursor;
 
 use image::ImageFormat;
 
-use super::lsb;
+use super::lsb::{self, LsbParams};
 use crate::traits::{Capacity, Encoder};
 use crate::Result;
 
 /// WebP cover image support.
 ///
 /// WebP is lossy, so the stego output is PNG (lossless) to preserve LSBs.
-/// Extraction uses `PngCodec` since the output format is PNG.
-pub struct WebpCodec;
+#[derive(Default)]
+pub struct WebpCodec {
+    pub params: LsbParams,
+}
+
+impl WebpCodec {
+    pub fn new(params: LsbParams) -> Self {
+        Self { params }
+    }
+}
 
 impl Capacity for WebpCodec {
     fn capacity(&self, cover: &[u8]) -> Result<usize> {
         let img = image::load_from_memory(cover)?;
-        Ok(lsb::max_payload_bytes(img.width(), img.height()))
+        Ok(lsb::max_payload_bytes(
+            img.width(),
+            img.height(),
+            self.params.bit_depth,
+        ))
     }
 }
 
@@ -24,9 +36,8 @@ impl Encoder for WebpCodec {
         let img = image::load_from_memory(cover)?;
         let mut rgba = img.to_rgba8();
 
-        lsb::embed_lsb(&mut rgba, payload)?;
+        lsb::embed_lsb(&mut rgba, payload, &self.params)?;
 
-        // Encode as PNG to preserve LSBs (WebP would destroy them)
         let mut output = Vec::new();
         rgba.write_to(&mut Cursor::new(&mut output), ImageFormat::Png)?;
         Ok(output)
@@ -57,8 +68,8 @@ mod tests {
     fn webp_to_png_roundtrip() {
         let cover = make_test_webp(64, 64);
         let payload = b"WebP steganography!";
-        let webp_codec = WebpCodec;
-        let png_codec = PngCodec;
+        let webp_codec = WebpCodec::default();
+        let png_codec = PngCodec::default();
 
         let stego = webp_codec.encode(&cover, payload).unwrap();
         let extracted = png_codec.decode(&stego).unwrap();
@@ -69,7 +80,7 @@ mod tests {
     #[test]
     fn webp_capacity() {
         let cover = make_test_webp(10, 10);
-        let codec = WebpCodec;
+        let codec = WebpCodec::default();
 
         let cap = codec.capacity(&cover).unwrap();
         assert_eq!(cap, 33);
@@ -78,7 +89,6 @@ mod tests {
     #[test]
     fn webp_format_detection() {
         let cover = make_test_webp(4, 4);
-        // WebP magic: RIFF at offset 0, WEBP at offset 8
         assert_eq!(&cover[..4], b"RIFF");
         assert_eq!(&cover[8..12], b"WEBP");
 

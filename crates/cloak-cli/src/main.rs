@@ -33,6 +33,10 @@ enum Command {
         /// Passphrase (will prompt if not provided)
         #[arg(short, long)]
         passphrase: Option<String>,
+
+        /// Bits per channel (1-4). Higher = more capacity, more visible artifacts.
+        #[arg(long, default_value = "1", value_parser = clap::value_parser!(u8).range(1..=4))]
+        bit_depth: u8,
     },
 
     /// Extract hidden data from a stego image
@@ -48,6 +52,10 @@ enum Command {
         /// Passphrase (will prompt if not provided)
         #[arg(short, long)]
         passphrase: Option<String>,
+
+        /// Bits per channel (must match embed setting)
+        #[arg(long, default_value = "1", value_parser = clap::value_parser!(u8).range(1..=4))]
+        bit_depth: u8,
     },
 
     /// Analyze an image for steganographic content
@@ -62,6 +70,10 @@ enum Command {
         /// Image path
         #[arg(short, long)]
         input: PathBuf,
+
+        /// Bits per channel (1-4)
+        #[arg(long, default_value = "1", value_parser = clap::value_parser!(u8).range(1..=4))]
+        bit_depth: u8,
     },
 
     /// Launch interactive TUI analysis dashboard
@@ -112,7 +124,6 @@ fn resolve_output_path(input_format: cloak_core::ImageFormat, output: &std::path
         let output_format = input_format.output_format();
         let out_ext = output_format.extension();
         let out_str = output.to_string_lossy().to_lowercase();
-        // If output has a lossy extension, correct it
         if out_str.ends_with(".jpg") || out_str.ends_with(".jpeg") || out_str.ends_with(".webp") {
             let stem = output.file_stem().unwrap_or_default();
             let parent = output.parent().unwrap_or(std::path::Path::new("."));
@@ -144,8 +155,10 @@ fn run() -> Result<()> {
             data,
             output,
             passphrase,
+            bit_depth,
         } => {
             let passphrase = get_passphrase(passphrase, true)?;
+            let options = cloak_core::EmbedOptions { bit_depth };
 
             let cover = fs::read(&input)
                 .with_context(|| format!("failed to read cover image: {}", input.display()))?;
@@ -156,7 +169,7 @@ fn run() -> Result<()> {
             let format = cloak_core::ImageFormat::detect(&cover, Some(&path_str))
                 .context("format detection failed")?;
 
-            let cap = cloak_core::capacity(&cover, Some(&path_str))
+            let cap = cloak_core::capacity(&cover, Some(&path_str), &options)
                 .context("failed to calculate capacity")?;
 
             if payload.len() > cap {
@@ -178,8 +191,9 @@ fn run() -> Result<()> {
             }
 
             let pb = make_progress("Embedding data...");
-            let stego = cloak_core::embed(&cover, &payload, &passphrase, Some(&path_str))
-                .context("embedding failed")?;
+            let stego =
+                cloak_core::embed(&cover, &payload, &passphrase, Some(&path_str), &options)
+                    .context("embedding failed")?;
             pb.finish_with_message("Embedding complete");
 
             fs::write(&output, stego)
@@ -192,15 +206,17 @@ fn run() -> Result<()> {
             input,
             output,
             passphrase,
+            bit_depth,
         } => {
             let passphrase = get_passphrase(passphrase, false)?;
+            let options = cloak_core::EmbedOptions { bit_depth };
 
             let stego = fs::read(&input)
                 .with_context(|| format!("failed to read stego image: {}", input.display()))?;
 
             let pb = make_progress("Extracting data...");
             let path_str = input.to_string_lossy();
-            let data = cloak_core::extract(&stego, &passphrase, Some(&path_str))
+            let data = cloak_core::extract(&stego, &passphrase, Some(&path_str), &options)
                 .context("extraction failed")?;
             pb.finish_with_message("Extraction complete");
 
@@ -218,7 +234,8 @@ fn run() -> Result<()> {
             let format = cloak_core::ImageFormat::detect(&data, Some(&path_str))
                 .context("format detection failed")?;
 
-            let cap = cloak_core::capacity(&data, Some(&path_str))
+            let options = cloak_core::EmbedOptions::default();
+            let cap = cloak_core::capacity(&data, Some(&path_str), &options)
                 .context("capacity calculation failed")?;
 
             let img = image::load_from_memory(&data).context("failed to decode image")?;
@@ -253,25 +270,32 @@ fn run() -> Result<()> {
                 if let Some(sp) = &analysis.sample_pairs {
                     println!();
                     println!("Sample Pairs:");
-                    println!("  Total pairs: {}  Close pairs: {}", sp.total_pairs, sp.close_pairs);
+                    println!(
+                        "  Total pairs: {}  Close pairs: {}",
+                        sp.total_pairs, sp.close_pairs
+                    );
                     println!("  Estimated rate: {:.4}", sp.estimated_rate);
                 }
 
                 if let Some(ent) = &analysis.entropy {
                     println!();
                     println!("Shannon Entropy (bits):");
-                    println!("  Red:   {:.4}  Green: {:.4}  Blue:  {:.4}", ent.red, ent.green, ent.blue);
+                    println!(
+                        "  Red:   {:.4}  Green: {:.4}  Blue:  {:.4}",
+                        ent.red, ent.green, ent.blue
+                    );
                     println!("  Average: {:.4}", ent.average);
                 }
             }
         }
 
-        Command::Capacity { input } => {
+        Command::Capacity { input, bit_depth } => {
             let data = fs::read(&input)
                 .with_context(|| format!("failed to read image: {}", input.display()))?;
 
             let path_str = input.to_string_lossy();
-            let cap = cloak_core::capacity(&data, Some(&path_str))
+            let options = cloak_core::EmbedOptions { bit_depth };
+            let cap = cloak_core::capacity(&data, Some(&path_str), &options)
                 .context("capacity calculation failed")?;
 
             println!("{cap} bytes");

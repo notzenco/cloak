@@ -80,7 +80,9 @@ impl AppState {
         let (width, height) = img.dimensions();
         let analysis_result = analysis::analyze_image(&image_data)?;
         let bit_plane = analysis::extract_bit_plane(&image_data, 0, 0)?;
-        let capacity = cloak_core::capacity(&image_data, Some(&filename)).unwrap_or(0);
+        let capacity =
+            cloak_core::capacity(&image_data, Some(&filename), &cloak_core::EmbedOptions::default())
+                .unwrap_or(0);
 
         Ok(Self {
             image_data,

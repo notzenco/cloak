@@ -2,17 +2,30 @@ use std::io::Cursor;
 
 use image::ImageFormat;
 
-use super::lsb;
+use super::lsb::{self, LsbParams};
 use crate::traits::{Capacity, Decoder, Encoder};
 use crate::Result;
 
 /// LSB steganography for BMP images.
-pub struct BmpCodec;
+#[derive(Default)]
+pub struct BmpCodec {
+    pub params: LsbParams,
+}
+
+impl BmpCodec {
+    pub fn new(params: LsbParams) -> Self {
+        Self { params }
+    }
+}
 
 impl Capacity for BmpCodec {
     fn capacity(&self, cover: &[u8]) -> Result<usize> {
         let img = image::load_from_memory(cover)?;
-        Ok(lsb::max_payload_bytes(img.width(), img.height()))
+        Ok(lsb::max_payload_bytes(
+            img.width(),
+            img.height(),
+            self.params.bit_depth,
+        ))
     }
 }
 
@@ -21,7 +34,7 @@ impl Encoder for BmpCodec {
         let img = image::load_from_memory(cover)?;
         let mut rgba = img.to_rgba8();
 
-        lsb::embed_lsb(&mut rgba, payload)?;
+        lsb::embed_lsb(&mut rgba, payload, &self.params)?;
 
         let mut output = Vec::new();
         rgba.write_to(&mut Cursor::new(&mut output), ImageFormat::Bmp)?;
@@ -33,7 +46,7 @@ impl Decoder for BmpCodec {
     fn decode(&self, stego: &[u8]) -> Result<Vec<u8>> {
         let img = image::load_from_memory(stego)?;
         let rgba = img.to_rgba8();
-        lsb::extract_lsb(&rgba)
+        lsb::extract_lsb(&rgba, &self.params)
     }
 }
 
@@ -59,7 +72,7 @@ mod tests {
     fn roundtrip() {
         let cover = make_test_bmp(64, 64);
         let payload = b"BMP steganography works!";
-        let codec = BmpCodec;
+        let codec = BmpCodec::default();
 
         let stego = codec.encode(&cover, payload).unwrap();
         let extracted = codec.decode(&stego).unwrap();
@@ -70,7 +83,7 @@ mod tests {
     #[test]
     fn capacity_check() {
         let cover = make_test_bmp(10, 10);
-        let codec = BmpCodec;
+        let codec = BmpCodec::default();
 
         let cap = codec.capacity(&cover).unwrap();
         assert_eq!(cap, 33);
@@ -79,7 +92,7 @@ mod tests {
     #[test]
     fn payload_too_large() {
         let cover = make_test_bmp(4, 4);
-        let codec = BmpCodec;
+        let codec = BmpCodec::default();
 
         let cap = codec.capacity(&cover).unwrap();
         let payload = vec![0xAA; cap + 1];
@@ -91,7 +104,7 @@ mod tests {
     #[test]
     fn max_capacity_payload() {
         let cover = make_test_bmp(32, 32);
-        let codec = BmpCodec;
+        let codec = BmpCodec::default();
 
         let cap = codec.capacity(&cover).unwrap();
         let payload: Vec<u8> = (0..cap).map(|i| (i % 256) as u8).collect();
