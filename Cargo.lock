@@ -375,6 +375,8 @@ dependencies = [
  "anyhow",
  "clap",
  "cloak-core",
+ "cloak-tui",
+ "image",
  "indicatif",
  "rpassword",
 ]
