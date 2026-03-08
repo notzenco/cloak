@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::{self, Read as _, Write as _};
 use std::path::PathBuf;
 use std::process;
 
@@ -18,17 +19,17 @@ struct Cli {
 enum Command {
     /// Embed encrypted data into a cover image
     Embed {
-        /// Cover image path
+        /// Cover image path (use "-" for stdin)
         #[arg(short, long)]
-        input: PathBuf,
+        input: String,
 
-        /// Data file to embed
+        /// Data file to embed (use "-" for stdin)
         #[arg(short, long)]
-        data: PathBuf,
+        data: String,
 
-        /// Output image path
+        /// Output image path (use "-" for stdout)
         #[arg(short, long)]
-        output: PathBuf,
+        output: String,
 
         /// Passphrase (will prompt if not provided)
         #[arg(short, long)]
@@ -45,13 +46,13 @@ enum Command {
 
     /// Extract hidden data from a stego image
     Extract {
-        /// Stego image path
+        /// Stego image path (use "-" for stdin)
         #[arg(short, long)]
-        input: PathBuf,
+        input: String,
 
-        /// Output file path for extracted data
+        /// Output file path for extracted data (use "-" for stdout)
         #[arg(short, long)]
-        output: PathBuf,
+        output: String,
 
         /// Passphrase (will prompt if not provided)
         #[arg(short, long)]
@@ -142,6 +143,32 @@ enum Command {
     },
 }
 
+/// Read from a file or stdin if path is "-".
+fn read_input(path: &str) -> Result<Vec<u8>> {
+    if path == "-" {
+        let mut buf = Vec::new();
+        io::stdin()
+            .read_to_end(&mut buf)
+            .context("failed to read from stdin")?;
+        Ok(buf)
+    } else {
+        fs::read(path).with_context(|| format!("failed to read: {path}"))
+    }
+}
+
+/// Write to a file or stdout if path is "-".
+fn write_output(path: &str, data: &[u8]) -> Result<()> {
+    if path == "-" {
+        io::stdout()
+            .write_all(data)
+            .context("failed to write to stdout")?;
+        io::stdout().flush().context("failed to flush stdout")?;
+        Ok(())
+    } else {
+        fs::write(path, data).with_context(|| format!("failed to write: {path}"))
+    }
+}
+
 fn get_passphrase(provided: Option<String>, confirm: bool) -> Result<String> {
     if let Some(p) = provided {
         return Ok(p);
@@ -178,30 +205,34 @@ fn make_progress(msg: &str) -> ProgressBar {
 
 fn resolve_output_path(
     input_format: cloak_core::ImageFormat,
-    output: &std::path::Path,
-) -> PathBuf {
+    output: &str,
+) -> String {
+    if output == "-" {
+        return output.to_string();
+    }
     if input_format.is_lossy() {
         let output_format = input_format.output_format();
         let out_ext = output_format.extension();
-        let out_str = output.to_string_lossy().to_lowercase();
-        if out_str.ends_with(".jpg") || out_str.ends_with(".jpeg") || out_str.ends_with(".webp") {
-            let stem = output.file_stem().unwrap_or_default();
-            let parent = output.parent().unwrap_or(std::path::Path::new("."));
+        let out_lower = output.to_lowercase();
+        if out_lower.ends_with(".jpg") || out_lower.ends_with(".jpeg") || out_lower.ends_with(".webp") {
+            let path = std::path::Path::new(output);
+            let stem = path.file_stem().unwrap_or_default();
+            let parent = path.parent().unwrap_or(std::path::Path::new("."));
             let corrected = parent.join(format!("{}{}", stem.to_string_lossy(), out_ext));
+            let corrected_str = corrected.to_string_lossy().to_string();
             eprintln!(
                 "Warning: lossy input format; output will be {} — saving as {}",
                 out_ext.trim_start_matches('.').to_uppercase(),
-                corrected.display()
+                corrected_str
             );
-            return corrected;
+            return corrected_str;
         }
     }
-    output.to_path_buf()
+    output.to_string()
 }
 
 /// Resolve input string as either a literal path or a glob pattern.
 fn resolve_inputs(input: &str) -> Result<Vec<PathBuf>> {
-    // Try as a glob pattern first
     let paths: Vec<PathBuf> = glob::glob(input)
         .context("invalid glob pattern")?
         .filter_map(|r| r.ok())
@@ -209,7 +240,6 @@ fn resolve_inputs(input: &str) -> Result<Vec<PathBuf>> {
         .collect();
 
     if paths.is_empty() {
-        // If glob matched nothing, treat as literal path
         let p = PathBuf::from(input);
         if p.exists() {
             return Ok(vec![p]);
@@ -239,22 +269,24 @@ fn run() -> Result<()> {
             bit_depth,
             randomize,
         } => {
+            if input == "-" && data == "-" {
+                bail!("cannot read both cover image and data from stdin");
+            }
+
             let passphrase = get_passphrase(passphrase, true)?;
             let options = cloak_core::EmbedOptions {
                 bit_depth,
                 randomized: randomize,
             };
 
-            let cover = fs::read(&input)
-                .with_context(|| format!("failed to read cover image: {}", input.display()))?;
-            let payload = fs::read(&data)
-                .with_context(|| format!("failed to read data file: {}", data.display()))?;
+            let cover = read_input(&input)?;
+            let payload = read_input(&data)?;
 
-            let path_str = input.to_string_lossy();
-            let format = cloak_core::ImageFormat::detect(&cover, Some(&path_str))
+            let path_hint = if input == "-" { None } else { Some(input.as_str()) };
+            let format = cloak_core::ImageFormat::detect(&cover, path_hint)
                 .context("format detection failed")?;
 
-            let cap = cloak_core::capacity(&cover, Some(&path_str), &options)
+            let cap = cloak_core::capacity(&cover, path_hint, &options)
                 .context("failed to calculate capacity")?;
 
             if payload.len() > cap {
@@ -267,10 +299,9 @@ fn run() -> Result<()> {
 
             let output = resolve_output_path(format, &output);
 
-            if format.is_lossy() {
+            if format.is_lossy() && output != "-" {
                 eprintln!(
-                    "Note: {} is a lossy format; stego output will be {}",
-                    path_str,
+                    "Note: lossy input format; stego output will be {}",
                     format
                         .output_format()
                         .extension()
@@ -279,16 +310,26 @@ fn run() -> Result<()> {
                 );
             }
 
-            let pb = make_progress("Embedding data...");
+            // Only show progress spinner when not piping to stdout
+            let pb = if output != "-" {
+                Some(make_progress("Embedding data..."))
+            } else {
+                None
+            };
+
             let stego =
-                cloak_core::embed(&cover, &payload, &passphrase, Some(&path_str), &options)
+                cloak_core::embed(&cover, &payload, &passphrase, path_hint, &options)
                     .context("embedding failed")?;
-            pb.finish_with_message("Embedding complete");
 
-            fs::write(&output, stego)
-                .with_context(|| format!("failed to write output: {}", output.display()))?;
+            if let Some(pb) = pb {
+                pb.finish_with_message("Embedding complete");
+            }
 
-            println!("Embedded {} bytes into {}", payload.len(), output.display());
+            write_output(&output, &stego)?;
+
+            if output != "-" {
+                println!("Embedded {} bytes into {}", payload.len(), output);
+            }
         }
 
         Command::Extract {
@@ -304,19 +345,27 @@ fn run() -> Result<()> {
                 randomized: randomize,
             };
 
-            let stego = fs::read(&input)
-                .with_context(|| format!("failed to read stego image: {}", input.display()))?;
+            let stego = read_input(&input)?;
 
-            let pb = make_progress("Extracting data...");
-            let path_str = input.to_string_lossy();
-            let data = cloak_core::extract(&stego, &passphrase, Some(&path_str), &options)
+            let pb = if output != "-" {
+                Some(make_progress("Extracting data..."))
+            } else {
+                None
+            };
+
+            let path_hint = if input == "-" { None } else { Some(input.as_str()) };
+            let data = cloak_core::extract(&stego, &passphrase, path_hint, &options)
                 .context("extraction failed")?;
-            pb.finish_with_message("Extraction complete");
 
-            fs::write(&output, &data)
-                .with_context(|| format!("failed to write output: {}", output.display()))?;
+            if let Some(pb) = pb {
+                pb.finish_with_message("Extraction complete");
+            }
 
-            println!("Extracted {} bytes to {}", data.len(), output.display());
+            write_output(&output, &data)?;
+
+            if output != "-" {
+                println!("Extracted {} bytes to {}", data.len(), output);
+            }
         }
 
         Command::Analyze { input } => {
@@ -469,7 +518,6 @@ fn run() -> Result<()> {
                     .to_string_lossy();
                 pb.set_message(stem.to_string());
 
-                // Find matching data file (any extension, same stem)
                 let data_pattern = format!("{}/{}.*", data_dir.display(), stem);
                 let data_file = glob::glob(&data_pattern)
                     .ok()
@@ -478,7 +526,6 @@ fn run() -> Result<()> {
                 let data_file = match data_file {
                     Some(f) => f,
                     None => {
-                        // Try exact stem match without extension
                         let exact = data_dir.join(&*stem);
                         if exact.is_file() {
                             exact
@@ -522,11 +569,7 @@ fn run() -> Result<()> {
                     }
                 };
 
-                let out_name = format!(
-                    "{}{}",
-                    stem,
-                    format.output_format().extension()
-                );
+                let out_name = format!("{}{}", stem, format.output_format().extension());
                 let out_path = output_dir.join(out_name);
 
                 match cloak_core::embed(&cover, &payload, &passphrase, Some(&path_str), &options) {
