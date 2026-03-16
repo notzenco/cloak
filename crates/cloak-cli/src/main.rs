@@ -188,6 +188,13 @@ fn get_passphrase(provided: Option<String>, confirm: bool) -> Result<String> {
         bail!("passphrase cannot be empty");
     }
 
+    if pass.len() < 8 {
+        eprintln!(
+            "Warning: passphrase is short ({} chars) — consider using 8+ characters for stronger security",
+            pass.len()
+        );
+    }
+
     Ok(pass)
 }
 
@@ -214,6 +221,7 @@ fn resolve_output_path(input_format: cloak_core::ImageFormat, output: &str) -> S
         if out_lower.ends_with(".jpg")
             || out_lower.ends_with(".jpeg")
             || out_lower.ends_with(".webp")
+            || out_lower.ends_with(".gif")
         {
             let path = std::path::Path::new(output);
             let stem = path.file_stem().unwrap_or_default();
