@@ -59,6 +59,7 @@ fn default_opts() -> EmbedOptions {
     EmbedOptions {
         bit_depth: 1,
         randomized: false,
+        ..Default::default()
     }
 }
 
@@ -124,6 +125,7 @@ fn multi_bit_roundtrip_depth_2() {
     let opts = EmbedOptions {
         bit_depth: 2,
         randomized: false,
+        ..Default::default()
     };
 
     let stego = cloak_core::embed(&cover, payload, PASSPHRASE, None, &opts).unwrap();
@@ -139,6 +141,7 @@ fn multi_bit_roundtrip_depth_4() {
     let opts = EmbedOptions {
         bit_depth: 4,
         randomized: false,
+        ..Default::default()
     };
 
     let stego = cloak_core::embed(&cover, payload, PASSPHRASE, None, &opts).unwrap();
@@ -154,6 +157,7 @@ fn randomized_roundtrip() {
     let opts = EmbedOptions {
         bit_depth: 1,
         randomized: true,
+        ..Default::default()
     };
 
     let stego = cloak_core::embed(&cover, payload, PASSPHRASE, None, &opts).unwrap();
@@ -169,6 +173,7 @@ fn randomized_multi_bit_roundtrip() {
     let opts = EmbedOptions {
         bit_depth: 3,
         randomized: true,
+        ..Default::default()
     };
 
     let stego = cloak_core::embed(&cover, payload, PASSPHRASE, None, &opts).unwrap();
@@ -202,10 +207,12 @@ fn wrong_bit_depth_extract() {
     let embed_opts = EmbedOptions {
         bit_depth: 2,
         randomized: false,
+        ..Default::default()
     };
     let extract_opts = EmbedOptions {
         bit_depth: 1,
         randomized: false,
+        ..Default::default()
     };
 
     let stego = cloak_core::embed(&cover, payload, PASSPHRASE, None, &embed_opts).unwrap();
@@ -225,10 +232,12 @@ fn wrong_randomize_flag() {
     let embed_opts = EmbedOptions {
         bit_depth: 1,
         randomized: true,
+        ..Default::default()
     };
     let extract_opts = EmbedOptions {
         bit_depth: 1,
         randomized: false,
+        ..Default::default()
     };
 
     let stego = cloak_core::embed(&cover, payload, PASSPHRASE, None, &embed_opts).unwrap();

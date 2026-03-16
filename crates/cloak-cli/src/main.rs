@@ -42,6 +42,10 @@ enum Command {
         /// Randomize pixel traversal order
         #[arg(long)]
         randomize: bool,
+
+        /// Use parallel embedding for faster processing
+        #[arg(long)]
+        parallel: bool,
     },
 
     /// Extract hidden data from a stego image
@@ -117,6 +121,10 @@ enum Command {
         /// Randomize pixel traversal order
         #[arg(long)]
         randomize: bool,
+
+        /// Use parallel embedding for faster processing
+        #[arg(long)]
+        parallel: bool,
     },
 
     /// Batch extract data from multiple stego images
@@ -258,6 +266,18 @@ fn resolve_inputs(input: &str) -> Result<Vec<PathBuf>> {
     Ok(paths)
 }
 
+fn format_number(n: usize) -> String {
+    let s = n.to_string();
+    let mut result = String::new();
+    for (i, c) in s.chars().rev().enumerate() {
+        if i > 0 && i % 3 == 0 {
+            result.push(',');
+        }
+        result.push(c);
+    }
+    result.chars().rev().collect()
+}
+
 fn main() {
     if let Err(e) = run() {
         eprintln!("error: {e:#}");
@@ -276,6 +296,7 @@ fn run() -> Result<()> {
             passphrase,
             bit_depth,
             randomize,
+            parallel,
         } => {
             if input == "-" && data == "-" {
                 bail!("cannot read both cover image and data from stdin");
@@ -285,6 +306,7 @@ fn run() -> Result<()> {
             let options = cloak_core::EmbedOptions {
                 bit_depth,
                 randomized: randomize,
+                parallel,
             };
 
             let cover = read_input(&input)?;
@@ -354,6 +376,7 @@ fn run() -> Result<()> {
             let options = cloak_core::EmbedOptions {
                 bit_depth,
                 randomized: randomize,
+                ..Default::default()
             };
 
             let stego = read_input(&input)?;
@@ -452,6 +475,41 @@ fn run() -> Result<()> {
                     }
                 }
 
+                if format == cloak_core::ImageFormat::Gif
+                    && let Ok(gif) = cloak_core::analysis::analyze_gif(&data)
+                {
+                    println!();
+                    println!("GIF Palette Analysis ({} colors):", gif.palette_size);
+                    if let Some(a) = &gif.palette_anomalies {
+                        println!(
+                            "  Sorted: {}  Min dist: {:.2}  Avg dist: {:.2}",
+                            a.is_sorted, a.min_distance, a.avg_distance
+                        );
+                        println!("  Anomaly score: {:.4}", a.anomaly_score);
+                    }
+                    if let Some(ez) = &gif.ezstego {
+                        println!(
+                            "  EzStego: flip ratio {:.4} ({})",
+                            ez.lsb_flip_ratio,
+                            if ez.detected { "DETECTED" } else { "clean" }
+                        );
+                    }
+                    if let Some(gs) = &gif.gifshuffle {
+                        println!(
+                            "  GifShuffle: tau {:.4}  entropy {:.4} ({})",
+                            gs.tau_distance,
+                            gs.ordering_entropy,
+                            if gs.detected { "DETECTED" } else { "clean" }
+                        );
+                    }
+                    if let Some(chi) = &gif.palette_chi_square {
+                        println!(
+                            "  Palette chi-square: {:.4} (p={:.4})",
+                            chi.chi_square, chi.p_value
+                        );
+                    }
+                }
+
                 if paths.len() > 1 {
                     println!();
                 }
@@ -470,13 +528,39 @@ fn run() -> Result<()> {
                     .with_context(|| format!("failed to read image: {}", path.display()))?;
 
                 let path_str = path.to_string_lossy();
-                let cap = cloak_core::capacity(&data, Some(&path_str), &options)
+                let report = cloak_core::capacity_report(&data, Some(&path_str), &options)
                     .context("capacity calculation failed")?;
 
                 if paths.len() > 1 {
-                    println!("{}: {cap} bytes", path.display());
-                } else {
-                    println!("{cap} bytes");
+                    println!("--- {} ---", path.display());
+                }
+                println!("Dimensions:    {} x {}", report.width, report.height);
+                println!("Format:        {:?}", report.format);
+                println!("Bit depth:     {}", report.bit_depth);
+                println!(
+                    "Pixel bits:    {}",
+                    format_number(report.breakdown.total_pixel_bits)
+                );
+                println!("Header bits:   {}", report.breakdown.length_header_bits);
+                println!(
+                    "Raw capacity:  {} bytes",
+                    format_number(report.breakdown.raw_capacity_bytes)
+                );
+                println!(
+                    "Pad blocks:    {}",
+                    format_number(report.breakdown.full_pad_blocks)
+                );
+                println!(
+                    "After padding: {} bytes",
+                    format_number(report.breakdown.usable_bytes)
+                );
+                println!("Crypto overhead: {} bytes", report.crypto_overhead);
+                println!(
+                    "Usable:        {} bytes",
+                    format_number(report.usable_bytes)
+                );
+                if paths.len() > 1 {
+                    println!();
                 }
             }
         }
@@ -495,11 +579,13 @@ fn run() -> Result<()> {
             passphrase,
             bit_depth,
             randomize,
+            parallel,
         } => {
             let passphrase = get_passphrase(passphrase, true)?;
             let options = cloak_core::EmbedOptions {
                 bit_depth,
                 randomized: randomize,
+                parallel,
             };
 
             fs::create_dir_all(&output_dir).with_context(|| {
@@ -618,6 +704,7 @@ fn run() -> Result<()> {
             let options = cloak_core::EmbedOptions {
                 bit_depth,
                 randomized: randomize,
+                ..Default::default()
             };
 
             fs::create_dir_all(&output_dir).with_context(|| {

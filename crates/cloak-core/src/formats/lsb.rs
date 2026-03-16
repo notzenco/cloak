@@ -79,22 +79,44 @@ pub fn derive_length_mask(passphrase: &str) -> [u8; 4] {
 /// making the exact data boundary harder to detect via steganalysis.
 const PAD_BLOCK: usize = 64;
 
+/// Detailed breakdown of embedding capacity at a given bit depth.
+#[derive(Debug, Clone)]
+pub struct CapacityBreakdown {
+    /// Total embeddable bits across all usable pixel channels.
+    pub total_pixel_bits: usize,
+    /// Bits consumed by the 4-byte length header.
+    pub length_header_bits: usize,
+    /// Raw capacity in bytes after subtracting the length header.
+    pub raw_capacity_bytes: usize,
+    /// Number of full `PAD_BLOCK`-sized blocks that fit in raw capacity.
+    pub full_pad_blocks: usize,
+    /// Usable bytes: `full_blocks * PAD_BLOCK`, or `raw` if no full block fits.
+    pub usable_bytes: usize,
+}
+
+/// Compute detailed capacity breakdown for the given image dimensions and bit depth.
+pub fn capacity_breakdown(width: u32, height: u32, bit_depth: u8) -> CapacityBreakdown {
+    let total_pixel_bits = width as usize * height as usize * CHANNELS * bit_depth as usize;
+    let length_header_bits = 32;
+    let raw_capacity_bytes = total_pixel_bits.saturating_sub(length_header_bits) / 8;
+    let full_pad_blocks = raw_capacity_bytes / PAD_BLOCK;
+    let usable_bytes = if full_pad_blocks == 0 {
+        raw_capacity_bytes
+    } else {
+        full_pad_blocks * PAD_BLOCK
+    };
+    CapacityBreakdown {
+        total_pixel_bits,
+        length_header_bits,
+        raw_capacity_bytes,
+        full_pad_blocks,
+        usable_bytes,
+    }
+}
+
 /// Maximum payload bytes that can be embedded at a given bit depth.
 pub fn max_payload_bytes(width: u32, height: u32, bit_depth: u8) -> usize {
-    let total_bits = width as usize * height as usize * CHANNELS * bit_depth as usize;
-    // Subtract 32 bits for the length header. The remaining capacity is for
-    // the padded payload, but we report the usable (pre-padding) amount.
-    let raw = total_bits.saturating_sub(32) / 8;
-    // Usable capacity is the largest payload that, once padded, still fits.
-    // padded_len = payload_len rounded up to PAD_BLOCK.
-    // We want the largest payload_len such that round_up(payload_len) <= raw.
-    let full_blocks = raw / PAD_BLOCK;
-    if full_blocks == 0 {
-        // Image is too small for even one block of padding; fall back to raw.
-        raw
-    } else {
-        full_blocks * PAD_BLOCK
-    }
+    capacity_breakdown(width, height, bit_depth).usable_bytes
 }
 
 /// Pad payload to a multiple of `PAD_BLOCK` with random bytes.
@@ -173,6 +195,105 @@ pub fn embed_lsb(rgba: &mut RgbaImage, payload: &[u8], params: &LsbParams) -> Re
                 }
             }
             pixel[channel as usize] = (pixel[channel as usize] & mask) | val;
+        }
+    }
+
+    Ok(())
+}
+
+/// Minimum pixel count for parallel embedding; below this, fall back to sequential.
+const PARALLEL_MIN_PIXELS: usize = 64 * 64;
+
+/// Embed payload into the low N bits of R, G, B channels using parallel processing.
+///
+/// Produces bit-identical output to [`embed_lsb`]. For images smaller than 64x64
+/// pixels, falls back to the sequential implementation.
+#[cfg(feature = "parallel")]
+pub fn embed_lsb_parallel(rgba: &mut RgbaImage, payload: &[u8], params: &LsbParams) -> Result<()> {
+    let (width, height) = rgba.dimensions();
+    let total_pixels = (width * height) as usize;
+
+    if total_pixels < PARALLEL_MIN_PIXELS {
+        return embed_lsb(rgba, payload, params);
+    }
+
+    let bit_depth = params.bit_depth.max(1);
+    let max = max_payload_bytes(width, height, bit_depth);
+
+    if payload.len() > max {
+        return Err(CloakError::PayloadTooLarge {
+            needed: payload.len(),
+            capacity: max,
+        });
+    }
+
+    let raw_len = (payload.len() as u32).to_be_bytes();
+    let len_bytes = [
+        raw_len[0] ^ params.length_mask[0],
+        raw_len[1] ^ params.length_mask[1],
+        raw_len[2] ^ params.length_mask[2],
+        raw_len[3] ^ params.length_mask[3],
+    ];
+    let padded = pad_payload(payload);
+    let all_bytes: Vec<u8> = len_bytes.iter().chain(padded.iter()).copied().collect();
+
+    let total_bits = all_bytes.len() * 8;
+    let mask = !((1u8 << bit_depth) - 1);
+    let bits_per_pixel = CHANNELS * bit_depth as usize;
+
+    use rayon::prelude::*;
+
+    let pixels_needed = total_bits.div_ceil(bits_per_pixel);
+
+    let compute_channel_vals = |i: usize| -> [u8; 3] {
+        let base_bit = i * bits_per_pixel;
+        let mut channel_vals = [0u8; 3];
+        for (channel, cv) in channel_vals.iter_mut().enumerate() {
+            let mut val = 0u8;
+            for b in 0..bit_depth {
+                let bit_idx = base_bit + channel * bit_depth as usize + b as usize;
+                if bit_idx < total_bits {
+                    let byte_pos = bit_idx / 8;
+                    let bit_pos = 7 - (bit_idx % 8);
+                    let bit = (all_bytes[byte_pos] >> bit_pos) & 1;
+                    val |= bit << (bit_depth - 1 - b);
+                }
+            }
+            *cv = val;
+        }
+        channel_vals
+    };
+
+    match &params.pixel_order {
+        PixelOrder::Sequential => {
+            let patches: Vec<(usize, [u8; 3])> = (0..pixels_needed)
+                .into_par_iter()
+                .map(|i| (i, compute_channel_vals(i)))
+                .collect();
+
+            for (i, channel_vals) in patches {
+                let x = (i % width as usize) as u32;
+                let y = (i / width as usize) as u32;
+                let pixel = rgba.get_pixel_mut(x, y);
+                for (ch, cv) in channel_vals.iter().enumerate() {
+                    pixel[ch] = (pixel[ch] & mask) | cv;
+                }
+            }
+        }
+        PixelOrder::Randomized(perm) => {
+            let patches: Vec<(usize, [u8; 3])> = (0..pixels_needed)
+                .into_par_iter()
+                .map(|i| (perm[i], compute_channel_vals(i)))
+                .collect();
+
+            for (pixel_idx, channel_vals) in patches {
+                let x = (pixel_idx % width as usize) as u32;
+                let y = (pixel_idx / width as usize) as u32;
+                let pixel = rgba.get_pixel_mut(x, y);
+                for (ch, cv) in channel_vals.iter().enumerate() {
+                    pixel[ch] = (pixel[ch] & mask) | cv;
+                }
+            }
         }
     }
 
@@ -333,6 +454,63 @@ mod tests {
             Ok(data) => assert_ne!(data, payload),
             Err(_) => {} // Also acceptable (corrupted length)
         }
+    }
+
+    #[cfg(feature = "parallel")]
+    #[test]
+    fn parallel_roundtrip_sequential() {
+        let mut rgba = make_test_rgba(128, 128);
+        let payload = b"parallel embedding, sequential extraction";
+
+        let params = LsbParams::default();
+        embed_lsb_parallel(&mut rgba, payload, &params).unwrap();
+        let extracted = extract_lsb(&rgba, &params).unwrap();
+        assert_eq!(extracted, payload);
+    }
+
+    #[cfg(feature = "parallel")]
+    #[test]
+    fn parallel_roundtrip_bit_depths() {
+        for bit_depth in 1..=4u8 {
+            let mut rgba = make_test_rgba(128, 128);
+            let params = LsbParams {
+                bit_depth,
+                ..Default::default()
+            };
+            let payload = b"multi-bit parallel test";
+            embed_lsb_parallel(&mut rgba, payload, &params).unwrap();
+            let extracted = extract_lsb(&rgba, &params).unwrap();
+            assert_eq!(extracted, payload, "bit_depth={bit_depth}");
+        }
+    }
+
+    #[cfg(feature = "parallel")]
+    #[test]
+    fn parallel_randomized_roundtrip() {
+        let mut rgba = make_test_rgba(128, 128);
+        let perm = generate_permutation("parallel-rand", 128 * 128).unwrap();
+        let mask = derive_length_mask("parallel-rand");
+        let params = LsbParams {
+            bit_depth: 2,
+            pixel_order: PixelOrder::Randomized(perm),
+            length_mask: mask,
+        };
+        let payload = b"parallel randomized embedding";
+        embed_lsb_parallel(&mut rgba, payload, &params).unwrap();
+        let extracted = extract_lsb(&rgba, &params).unwrap();
+        assert_eq!(extracted, payload);
+    }
+
+    #[cfg(feature = "parallel")]
+    #[test]
+    fn parallel_small_image_fallback() {
+        let mut rgba = make_test_rgba(4, 4);
+        let params = LsbParams::default();
+        let payload = b"sm";
+        // Should not panic — falls back to sequential
+        embed_lsb_parallel(&mut rgba, payload, &params).unwrap();
+        let extracted = extract_lsb(&rgba, &params).unwrap();
+        assert_eq!(extracted, payload);
     }
 
     #[test]

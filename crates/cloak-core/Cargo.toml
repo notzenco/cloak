@@ -1,6 +1,6 @@
 [package]
 name = "cloak-core"
-version = "0.1.0"
+version = "0.4.0"
 edition.workspace = true
 license.workspace = true
 description = "Steganography toolkit - core library"
@@ -9,6 +9,9 @@ keywords = ["steganography", "encryption", "security", "privacy", "stego"]
 categories = ["cryptography", "command-line-utilities", "multimedia::images"]
 readme = "../../README.md"
 
+[features]
+parallel = ["rayon"]
+
 [dependencies]
 chacha20poly1305 = { workspace = true }
 argon2 = { workspace = true }
@@ -16,9 +19,12 @@ rand = { workspace = true }
 rand_chacha = { workspace = true }
 image = { workspace = true }
 thiserror = { workspace = true }
+rayon = { workspace = true, optional = true }
+gif = "0.13"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
+proptest = { workspace = true }
 
 [[bench]]
 name = "steganography"

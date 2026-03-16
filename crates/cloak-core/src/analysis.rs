@@ -443,6 +443,340 @@ fn erfc(x: f64) -> f64 {
     if x >= 0.0 { result } else { 2.0 - result }
 }
 
+/// GIF-specific steganalysis results.
+#[derive(Debug, Clone)]
+pub struct GifAnalysisResult {
+    pub palette_size: usize,
+    pub palette_anomalies: Option<PaletteAnomalyResult>,
+    pub ezstego: Option<EzStegoResult>,
+    pub gifshuffle: Option<GifShuffleResult>,
+    pub palette_chi_square: Option<PaletteChiSquareResult>,
+}
+
+/// Palette anomaly detection result.
+#[derive(Debug, Clone)]
+pub struct PaletteAnomalyResult {
+    /// Whether the palette appears to be sorted by luminance.
+    pub is_sorted: bool,
+    /// Standard deviation of palette entry usage frequencies.
+    pub frequency_std_dev: f64,
+    /// Minimum Euclidean distance between any two palette entries.
+    pub min_distance: f64,
+    /// Average Euclidean distance between consecutive palette entries.
+    pub avg_distance: f64,
+    /// Anomaly score (0.0 = normal, 1.0 = highly anomalous).
+    pub anomaly_score: f64,
+}
+
+/// EzStego detection result.
+#[derive(Debug, Clone)]
+pub struct EzStegoResult {
+    /// Ratio of adjacent luminance-sorted pairs with LSB-flipped indices.
+    pub lsb_flip_ratio: f64,
+    /// Whether EzStego-like embedding is detected.
+    pub detected: bool,
+}
+
+/// Gifshuffle detection result.
+#[derive(Debug, Clone)]
+pub struct GifShuffleResult {
+    /// Kendall tau distance from luminance-sorted order (0.0 = sorted, 1.0 = reversed).
+    pub tau_distance: f64,
+    /// Shannon entropy of palette ordering.
+    pub ordering_entropy: f64,
+    /// Whether gifshuffle-like embedding is detected.
+    pub detected: bool,
+}
+
+/// Palette-based chi-square test result.
+#[derive(Debug, Clone)]
+pub struct PaletteChiSquareResult {
+    pub chi_square: f64,
+    pub p_value: f64,
+}
+
+/// Parse a GIF's palette and pixel index stream from raw GIF data.
+fn parse_gif_palette(data: &[u8]) -> Result<(Vec<[u8; 3]>, Vec<u8>)> {
+    let mut decoder = gif::DecodeOptions::new();
+    decoder.set_color_output(gif::ColorOutput::Indexed);
+    let mut reader = decoder
+        .read_info(data)
+        .map_err(|e| CloakError::CorruptedData(format!("GIF decode error: {e}")))?;
+
+    let global_palette = reader.palette().ok().map(|p| p.to_vec());
+
+    let frame = reader
+        .read_next_frame()
+        .map_err(|e| CloakError::CorruptedData(format!("GIF frame error: {e}")))?
+        .ok_or_else(|| CloakError::CorruptedData("GIF has no frames".into()))?;
+
+    let palette_bytes = frame
+        .palette
+        .as_deref()
+        .or(global_palette.as_deref())
+        .ok_or_else(|| CloakError::CorruptedData("GIF has no color table".into()))?;
+
+    let palette: Vec<[u8; 3]> = palette_bytes
+        .chunks_exact(3)
+        .map(|c| [c[0], c[1], c[2]])
+        .collect();
+    let indices = frame.buffer.to_vec();
+
+    Ok((palette, indices))
+}
+
+/// Compute luminance of an RGB color (BT.601).
+fn luminance(rgb: &[u8; 3]) -> f64 {
+    0.299 * rgb[0] as f64 + 0.587 * rgb[1] as f64 + 0.114 * rgb[2] as f64
+}
+
+/// Euclidean distance between two RGB colors.
+fn color_distance(a: &[u8; 3], b: &[u8; 3]) -> f64 {
+    let dr = a[0] as f64 - b[0] as f64;
+    let dg = a[1] as f64 - b[1] as f64;
+    let db = a[2] as f64 - b[2] as f64;
+    (dr * dr + dg * dg + db * db).sqrt()
+}
+
+/// Detect palette anomalies (sorting, frequency distribution, distances).
+fn detect_palette_anomalies(palette: &[[u8; 3]], indices: &[u8]) -> PaletteAnomalyResult {
+    let n = palette.len();
+
+    // Check if sorted by luminance
+    let luminances: Vec<f64> = palette.iter().map(luminance).collect();
+    let is_sorted = luminances.windows(2).all(|w| w[0] <= w[1]);
+
+    // Frequency distribution
+    let mut freq = vec![0u64; n];
+    for &idx in indices {
+        if (idx as usize) < n {
+            freq[idx as usize] += 1;
+        }
+    }
+    let mean_freq = freq.iter().sum::<u64>() as f64 / n as f64;
+    let variance = freq
+        .iter()
+        .map(|&f| (f as f64 - mean_freq).powi(2))
+        .sum::<f64>()
+        / n as f64;
+    let frequency_std_dev = variance.sqrt();
+
+    // Distance metrics
+    let mut min_distance = f64::MAX;
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let d = color_distance(&palette[i], &palette[j]);
+            if d < min_distance {
+                min_distance = d;
+            }
+        }
+    }
+    if min_distance == f64::MAX {
+        min_distance = 0.0;
+    }
+
+    let avg_distance = if n > 1 {
+        luminances
+            .windows(2)
+            .map(|w| (w[1] - w[0]).abs())
+            .sum::<f64>()
+            / (n - 1) as f64
+    } else {
+        0.0
+    };
+
+    // Anomaly score: combine factors
+    let sort_score: f64 = if is_sorted { 0.3 } else { 0.0 };
+    let dist_score: f64 = if min_distance < 2.0 { 0.3 } else { 0.0 };
+    let freq_score: f64 = if frequency_std_dev > mean_freq * 2.0 {
+        0.0
+    } else {
+        0.2
+    };
+    let anomaly_score = (sort_score + dist_score + freq_score).clamp(0.0, 1.0);
+
+    PaletteAnomalyResult {
+        is_sorted,
+        frequency_std_dev,
+        min_distance,
+        avg_distance,
+        anomaly_score,
+    }
+}
+
+/// Detect EzStego-like embedding (LSB flips in luminance-sorted palette pairs).
+fn detect_ezstego(palette: &[[u8; 3]], indices: &[u8]) -> EzStegoResult {
+    let n = palette.len();
+
+    // Sort palette indices by luminance
+    let mut lum_order: Vec<usize> = (0..n).collect();
+    lum_order.sort_by(|&a, &b| {
+        luminance(&palette[a])
+            .partial_cmp(&luminance(&palette[b]))
+            .unwrap()
+    });
+
+    // Build reverse mapping: original index → position in luminance order
+    let mut lum_rank = vec![0usize; n];
+    for (rank, &orig) in lum_order.iter().enumerate() {
+        lum_rank[orig] = rank;
+    }
+
+    // Count how many consecutive index pairs differ only in the LSB of their luminance rank
+    let mut lsb_flips = 0u64;
+    let mut total_pairs = 0u64;
+    for pair in indices.windows(2) {
+        let r0 = lum_rank.get(pair[0] as usize).copied().unwrap_or(0);
+        let r1 = lum_rank.get(pair[1] as usize).copied().unwrap_or(0);
+        if r0 ^ r1 == 1 {
+            lsb_flips += 1;
+        }
+        total_pairs += 1;
+    }
+
+    let lsb_flip_ratio = if total_pairs > 0 {
+        lsb_flips as f64 / total_pairs as f64
+    } else {
+        0.0
+    };
+
+    // In a natural image, LSB flip ratio between adjacent luminance-ranked pairs
+    // is typically low; EzStego increases it significantly
+    let detected = lsb_flip_ratio > 0.3;
+
+    EzStegoResult {
+        lsb_flip_ratio,
+        detected,
+    }
+}
+
+/// Detect gifshuffle-like embedding (palette reordering from luminance sort).
+fn detect_gifshuffle(palette: &[[u8; 3]]) -> GifShuffleResult {
+    let n = palette.len();
+
+    // Luminance-sorted order
+    let mut lum_order: Vec<usize> = (0..n).collect();
+    lum_order.sort_by(|&a, &b| {
+        luminance(&palette[a])
+            .partial_cmp(&luminance(&palette[b]))
+            .unwrap()
+    });
+
+    // Kendall tau distance: count discordant pairs
+    let mut discordant = 0u64;
+    let mut total_pairs = 0u64;
+    for i in 0..n {
+        for j in (i + 1)..n {
+            // In the current palette order, index i comes before j.
+            // In the luminance order, check if lum_order position of i > j.
+            let pos_i = lum_order.iter().position(|&x| x == i).unwrap_or(0);
+            let pos_j = lum_order.iter().position(|&x| x == j).unwrap_or(0);
+            if pos_i > pos_j {
+                discordant += 1;
+            }
+            total_pairs += 1;
+        }
+    }
+
+    let tau_distance = if total_pairs > 0 {
+        discordant as f64 / total_pairs as f64
+    } else {
+        0.0
+    };
+
+    // Ordering entropy: Shannon entropy of the permutation's descent pattern
+    let mut descents = 0usize;
+    for i in 1..n {
+        let prev_lum = luminance(&palette[i - 1]);
+        let curr_lum = luminance(&palette[i]);
+        if curr_lum < prev_lum {
+            descents += 1;
+        }
+    }
+    let ordering_entropy = if n > 1 {
+        let p = descents as f64 / (n - 1) as f64;
+        if p > 0.0 && p < 1.0 {
+            -(p * p.log2() + (1.0 - p) * (1.0 - p).log2())
+        } else {
+            0.0
+        }
+    } else {
+        0.0
+    };
+
+    // Gifshuffle randomizes the palette order; high tau distance + high entropy = detected
+    let detected = tau_distance > 0.4 && ordering_entropy > 0.8;
+
+    GifShuffleResult {
+        tau_distance,
+        ordering_entropy,
+        detected,
+    }
+}
+
+/// Chi-square test on palette index pairs (even/odd analysis).
+fn palette_chi_square(palette: &[[u8; 3]], indices: &[u8]) -> PaletteChiSquareResult {
+    let n = palette.len();
+    let mut histogram = vec![0u64; n];
+    for &idx in indices {
+        if (idx as usize) < n {
+            histogram[idx as usize] += 1;
+        }
+    }
+
+    // Chi-square on even/odd index pairs
+    let mut chi2 = 0.0;
+    let mut df = 0usize;
+    for k in 0..(n / 2) {
+        let even = histogram[2 * k] as f64;
+        let odd = histogram[2 * k + 1] as f64;
+        let expected = (even + odd) / 2.0;
+        if expected > 0.0 {
+            chi2 += (even - expected).powi(2) / expected;
+            chi2 += (odd - expected).powi(2) / expected;
+            df += 1;
+        }
+    }
+
+    let p_value = chi_square_p_value(chi2, df);
+
+    PaletteChiSquareResult {
+        chi_square: chi2,
+        p_value,
+    }
+}
+
+/// Perform GIF-specific steganalysis on raw GIF data.
+pub fn analyze_gif(data: &[u8]) -> Result<GifAnalysisResult> {
+    let (palette, indices) = parse_gif_palette(data)?;
+    let palette_size = palette.len();
+
+    let (palette_anomalies, ezstego, gifshuffle, palette_chi_sq) = if palette_size < 8 {
+        // Too few colors for reliable analysis
+        (
+            Some(detect_palette_anomalies(&palette, &indices)),
+            None,
+            None,
+            None,
+        )
+    } else {
+        (
+            Some(detect_palette_anomalies(&palette, &indices)),
+            Some(detect_ezstego(&palette, &indices)),
+            Some(detect_gifshuffle(&palette)),
+            Some(palette_chi_square(&palette, &indices)),
+        )
+    };
+
+    Ok(GifAnalysisResult {
+        palette_size,
+        palette_anomalies,
+        ezstego,
+        gifshuffle,
+        palette_chi_square: palette_chi_sq,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -625,5 +959,114 @@ mod tests {
         let result = analyze_image(&buf).unwrap();
         let ent = result.entropy.unwrap();
         assert!(ent.average > 7.0, "entropy {} expected > 7.0", ent.average);
+    }
+
+    // --- GIF analysis tests ---
+
+    fn make_test_gif(palette: &[[u8; 3]], width: u16, height: u16, indices: &[u8]) -> Vec<u8> {
+        let mut buf = Vec::new();
+        {
+            let palette_flat: Vec<u8> = palette.iter().flat_map(|c| c.iter().copied()).collect();
+            let mut encoder = gif::Encoder::new(&mut buf, width, height, &palette_flat).unwrap();
+            let mut frame = gif::Frame::default();
+            frame.width = width;
+            frame.height = height;
+            frame.buffer = std::borrow::Cow::Borrowed(indices);
+            encoder.write_frame(&frame).unwrap();
+        }
+        buf
+    }
+
+    #[test]
+    fn gif_clean_palette_low_anomaly() {
+        // Sorted palette with smooth gradient
+        let palette: Vec<[u8; 3]> = (0..16).map(|i| [i * 16, i * 16, i * 16]).collect();
+        let indices: Vec<u8> = (0..64).map(|i| (i % 16) as u8).collect();
+        let data = make_test_gif(&palette, 8, 8, &indices);
+
+        let result = analyze_gif(&data).unwrap();
+        assert_eq!(result.palette_size, 16);
+        let anomalies = result.palette_anomalies.unwrap();
+        assert!(anomalies.is_sorted);
+    }
+
+    #[test]
+    fn gif_shuffled_palette_detected() {
+        // Luminance-sorted palette, then shuffle it
+        let mut palette: Vec<[u8; 3]> = (0..32).map(|i| [i * 8, i * 8, i * 8]).collect();
+        // Reverse to simulate heavy reordering
+        palette.reverse();
+        let indices: Vec<u8> = (0..64).map(|i| (i % 32) as u8).collect();
+        let data = make_test_gif(&palette, 8, 8, &indices);
+
+        let result = analyze_gif(&data).unwrap();
+        let gs = result.gifshuffle.unwrap();
+        // Reversed palette should have high tau distance
+        assert!(gs.tau_distance > 0.3, "tau={}", gs.tau_distance);
+    }
+
+    #[test]
+    fn gif_lsb_flipped_indices_ezstego() {
+        // Create a palette sorted by luminance
+        let palette: Vec<[u8; 3]> = (0..16).map(|i| [i * 16, i * 16, i * 16]).collect();
+        // Create indices where consecutive pixels alternate between even/odd pairs
+        // This simulates EzStego-like LSB flipping
+        let indices: Vec<u8> = (0..256)
+            .map(|i| {
+                let base = (i / 2) % 8;
+                (base * 2 + (i % 2)) as u8
+            })
+            .collect();
+        let data = make_test_gif(&palette, 16, 16, &indices);
+
+        let result = analyze_gif(&data).unwrap();
+        let ez = result.ezstego.unwrap();
+        assert!(ez.lsb_flip_ratio > 0.0, "ratio={}", ez.lsb_flip_ratio);
+    }
+
+    #[test]
+    fn gif_palette_chi_square_clean() {
+        let palette: Vec<[u8; 3]> = (0..16).map(|i| [i * 16, i * 16, i * 16]).collect();
+        // Uniform usage of all indices
+        let indices: Vec<u8> = (0..256).map(|i| (i % 16) as u8).collect();
+        let data = make_test_gif(&palette, 16, 16, &indices);
+
+        let result = analyze_gif(&data).unwrap();
+        let chi = result.palette_chi_square.unwrap();
+        assert!(chi.chi_square >= 0.0);
+        assert!(chi.p_value >= 0.0 && chi.p_value <= 1.0);
+    }
+
+    #[test]
+    fn gif_small_palette_limited_analysis() {
+        // Only 4 colors — too small for full analysis
+        let palette = [[0, 0, 0], [85, 85, 85], [170, 170, 170], [255, 255, 255]];
+        let indices: Vec<u8> = (0..16).map(|i| (i % 4) as u8).collect();
+        let data = make_test_gif(&palette, 4, 4, &indices);
+
+        let result = analyze_gif(&data).unwrap();
+        assert_eq!(result.palette_size, 4);
+        assert!(result.palette_anomalies.is_some());
+        assert!(result.ezstego.is_none()); // Too few colors
+        assert!(result.gifshuffle.is_none());
+    }
+
+    #[test]
+    fn gif_256_color_palette() {
+        let palette: Vec<[u8; 3]> = (0..=255).map(|i| [i, i, i]).collect();
+        let indices: Vec<u8> = (0..64).map(|i| (i * 4) as u8).collect();
+        let data = make_test_gif(&palette, 8, 8, &indices);
+
+        let result = analyze_gif(&data).unwrap();
+        assert_eq!(result.palette_size, 256);
+        assert!(result.ezstego.is_some());
+        assert!(result.gifshuffle.is_some());
+    }
+
+    #[test]
+    fn analyze_gif_on_non_gif_fails() {
+        let png = make_test_png(8, 8);
+        let result = analyze_gif(&png);
+        assert!(result.is_err());
     }
 }

@@ -121,6 +121,7 @@ fn bench_e2e(c: &mut Criterion) {
     let opts = cloak_core::EmbedOptions {
         bit_depth: 1,
         randomized: false,
+        ..Default::default()
     };
     let payload = b"end-to-end benchmark payload data for testing";
 
@@ -137,6 +138,38 @@ fn bench_e2e(c: &mut Criterion) {
     group.finish();
 }
 
+#[cfg(feature = "parallel")]
+fn bench_embed_parallel(c: &mut Criterion) {
+    let mut group = c.benchmark_group("embed_parallel");
+
+    for &size in &[256u32, 512] {
+        let cover = make_png(size, size);
+        let codec = LsbCodec::new(LsbParams::default(), CloakFormat::Png);
+        let cap = codec.capacity(&cover).unwrap();
+        let payload: Vec<u8> = (0..cap.min(1024)).map(|i| (i % 256) as u8).collect();
+
+        let img = image::load_from_memory(&cover).unwrap();
+
+        group.bench_with_input(
+            BenchmarkId::new("parallel", format!("{size}x{size}")),
+            &size,
+            |b, _| {
+                b.iter(|| {
+                    let mut rgba = img.to_rgba8();
+                    cloak_core::formats::lsb::embed_lsb_parallel(
+                        &mut rgba,
+                        &payload,
+                        &LsbParams::default(),
+                    )
+                    .unwrap();
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_embed,
@@ -145,4 +178,12 @@ criterion_group!(
     bench_randomized,
     bench_e2e,
 );
+
+#[cfg(feature = "parallel")]
+criterion_group!(parallel_benches, bench_embed_parallel,);
+
+#[cfg(feature = "parallel")]
+criterion_main!(benches, parallel_benches);
+
+#[cfg(not(feature = "parallel"))]
 criterion_main!(benches);

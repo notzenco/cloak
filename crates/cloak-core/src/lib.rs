@@ -4,10 +4,14 @@ pub mod error;
 pub mod formats;
 pub mod traits;
 
+pub use analysis::{
+    EzStegoResult, GifAnalysisResult, GifShuffleResult, PaletteAnomalyResult,
+    PaletteChiSquareResult,
+};
 pub use error::CloakError;
 pub use formats::ImageFormat;
 pub use formats::LsbCodec;
-pub use formats::lsb::LsbParams;
+pub use formats::lsb::{CapacityBreakdown, LsbParams};
 pub use traits::{Capacity, Decoder, Encoder};
 
 pub type Result<T> = std::result::Result<T, CloakError>;
@@ -19,6 +23,8 @@ pub struct EmbedOptions {
     pub bit_depth: u8,
     /// Use randomized pixel traversal order. Default: false.
     pub randomized: bool,
+    /// Use parallel embedding (requires `parallel` feature). Default: false.
+    pub parallel: bool,
 }
 
 impl EmbedOptions {
@@ -37,14 +43,6 @@ impl EmbedOptions {
             pixel_order,
             ..Default::default()
         })
-    }
-
-    fn lsb_params_no_rand(&self) -> LsbParams {
-        LsbParams {
-            bit_depth: self.bit_depth.max(1),
-            pixel_order: formats::lsb::PixelOrder::Sequential,
-            ..Default::default()
-        }
     }
 }
 
@@ -66,7 +64,12 @@ pub fn embed(
     params.length_mask = formats::lsb::derive_length_mask(passphrase);
 
     let output_format = format.output_format();
-    formats::LsbCodec::new(params, output_format).encode_image(&img, &encrypted)
+    let codec = formats::LsbCodec::new(params, output_format);
+    if options.parallel {
+        codec.encode_image_parallel(&img, &encrypted)
+    } else {
+        codec.encode_image(&img, &encrypted)
+    }
 }
 
 /// Extract and decrypt payload from a stego image.
@@ -97,11 +100,43 @@ pub fn extract(
     crypto::decrypt(&encrypted, passphrase)
 }
 
+/// Detailed capacity report for an image.
+#[derive(Debug, Clone)]
+pub struct CapacityReport {
+    pub width: u32,
+    pub height: u32,
+    pub format: ImageFormat,
+    pub bit_depth: u8,
+    pub breakdown: CapacityBreakdown,
+    pub crypto_overhead: usize,
+    pub usable_bytes: usize,
+}
+
+/// Compute a detailed capacity report for a cover image.
+pub fn capacity_report(
+    cover: &[u8],
+    path: Option<&str>,
+    options: &EmbedOptions,
+) -> Result<CapacityReport> {
+    let format = ImageFormat::detect(cover, path)?;
+    let img = image::load_from_memory(cover)?;
+    let (width, height) = (img.width(), img.height());
+    let bit_depth = options.bit_depth.max(1);
+    let breakdown = formats::lsb::capacity_breakdown(width, height, bit_depth);
+    let crypto_overhead = crypto::overhead();
+    let usable_bytes = breakdown.usable_bytes.saturating_sub(crypto_overhead);
+    Ok(CapacityReport {
+        width,
+        height,
+        format,
+        bit_depth,
+        breakdown,
+        crypto_overhead,
+        usable_bytes,
+    })
+}
+
 /// Get the maximum payload capacity in bytes (after encryption overhead).
 pub fn capacity(cover: &[u8], path: Option<&str>, options: &EmbedOptions) -> Result<usize> {
-    let format = ImageFormat::detect(cover, path)?;
-    // Capacity doesn't need randomization
-    let params = options.lsb_params_no_rand();
-    let raw_capacity = formats::LsbCodec::new(params, format).capacity(cover)?;
-    Ok(raw_capacity.saturating_sub(crypto::overhead()))
+    Ok(capacity_report(cover, path, options)?.usable_bytes)
 }

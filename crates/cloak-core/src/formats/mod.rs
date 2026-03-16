@@ -141,6 +141,28 @@ impl LsbCodec {
         Ok(output)
     }
 
+    /// Embed payload into a pre-decoded image using parallel processing.
+    ///
+    /// Falls back to sequential when the `parallel` feature is not enabled.
+    pub fn encode_image_parallel(
+        &self,
+        img: &image::DynamicImage,
+        payload: &[u8],
+    ) -> Result<Vec<u8>> {
+        #[cfg(feature = "parallel")]
+        {
+            let mut rgba = img.to_rgba8();
+            lsb::embed_lsb_parallel(&mut rgba, payload, &self.params)?;
+            let mut output = Vec::new();
+            rgba.write_to(&mut Cursor::new(&mut output), self.image_format())?;
+            Ok(output)
+        }
+        #[cfg(not(feature = "parallel"))]
+        {
+            self.encode_image(img, payload)
+        }
+    }
+
     /// Extract payload from a pre-decoded image (avoids double decoding).
     pub fn decode_image(&self, img: &image::DynamicImage) -> Result<Vec<u8>> {
         let rgba = img.to_rgba8();
