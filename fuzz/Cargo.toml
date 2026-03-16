@@ -1,0 +1,44 @@
+[package]
+name = "cloak-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+cloak-core = { path = "../crates/cloak-core" }
+image = "0.25"
+arbitrary = { version = "1", features = ["derive"] }
+
+[[bin]]
+name = "fuzz_extract"
+path = "fuzz_targets/fuzz_extract.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_embed"
+path = "fuzz_targets/fuzz_embed.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_analyze"
+path = "fuzz_targets/fuzz_analyze.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_decrypt"
+path = "fuzz_targets/fuzz_decrypt.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_format_detect"
+path = "fuzz_targets/fuzz_format_detect.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_wire_format"
+path = "fuzz_targets/fuzz_wire_format.rs"
+doc = false
