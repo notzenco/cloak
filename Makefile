@@ -1,4 +1,4 @@
-.PHONY: build test lint fmt clean
+.PHONY: build test lint fmt clean bench
 
 build:
 	cargo build --workspace
@@ -15,7 +15,13 @@ fmt:
 fmt-check:
 	cargo fmt --all --check
 
+bench:
+	cargo bench --package cloak-core
+
 clean:
 	cargo clean
+
+doc:
+	cargo doc --workspace --no-deps --open
 
 check: fmt-check lint test
