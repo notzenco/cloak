@@ -130,8 +130,10 @@ cloak inspect -i image.png
 
 ```bash
 cargo build --workspace
-cargo test --workspace
+make check
 ```
+
+`make check` is the release/PR gate and runs format, clippy, and test checks across the workspace.
 
 ## Benchmarks
 

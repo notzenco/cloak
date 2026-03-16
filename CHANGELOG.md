@@ -4,7 +4,7 @@
 
 - Versioned wire format: `WireVersion` enum, `detect_version()` function, `UnsupportedVersion` error variant, decrypt dispatches by version
 - Parallel embedding via rayon: `embed_lsb_parallel()` with `--parallel` CLI flag, optional `parallel` feature in cloak-core, falls back to sequential for images < 64x64
-- Enhanced capacity reporting: `CapacityBreakdown` struct with detailed metrics, `capacity_report()` API, CLI capacity command shows full breakdown
+- Enhanced capacity reporting: `capacity_report()` now returns `CapacityReport` with nested `CapacityBreakdown` metrics, and the CLI capacity command shows the full breakdown
 - GIF-specific steganalysis: palette anomaly detection, EzStego detection, Gifshuffle detection, palette chi-square test, integrated into CLI analyze command
 - Property-based testing with proptest: 21 tests across 5 files covering roundtrip, analysis, capacity, crypto, and format detection
 - Fuzz targets with cargo-fuzz: 6 fuzz harnesses for extract, embed, analyze, decrypt, format detection, and wire format parsing
