@@ -8,13 +8,19 @@ A modern steganography toolkit written in Rust. Embed encrypted data within imag
 - **6 image formats** — PNG, BMP, JPEG, WebP, GIF, and TIFF cover images
 - **Multi-bit LSB** — Embed using 1-4 bits per channel (`--bit-depth`) for higher capacity
 - **Randomized embedding** — Passphrase-derived pixel traversal order (`--randomize`) for improved security
+- **Parallel embedding** — Optional rayon-based parallelism (`--parallel`) for large images
+- **Versioned wire format** — Forward-compatible encryption format with version detection
 - **Encrypted length header** — Payload length XOR-masked with a passphrase-derived key to resist steganalysis
 - **Payload padding** — Random padding to 64-byte block boundaries hides exact data boundaries
 - **Steganalysis suite** — Chi-square testing, RS analysis, sample pairs analysis, Shannon entropy, histogram analysis, bit-plane extraction
+- **GIF-specific steganalysis** — Palette anomaly detection, EzStego detection, Gifshuffle detection, palette chi-square testing
+- **Detailed capacity reporting** — Full breakdown of pixel bits, padding overhead, and crypto overhead
 - **Batch processing** — Embed/extract across entire directories with `batch-embed` / `batch-extract`
 - **Stdin/stdout piping** — Use `-` as path for pipeline integration
 - **TUI dashboard** — Interactive terminal-based image analysis
 - **CLI** — Full-featured command-line interface with passphrase strength warnings
+- **Property-based testing** — Proptest roundtrip and invariant tests across randomized inputs
+- **Fuzz targets** — Cargo-fuzz harnesses for all untrusted input paths
 
 ## Format Support
 
@@ -50,6 +56,9 @@ cloak extract -i output.png -o recovered.txt --randomize
 # Combine both
 cloak embed -i cover.png -d secret.txt -o output.png --bit-depth 4 --randomize
 cloak extract -i output.png -o recovered.txt --bit-depth 4 --randomize
+
+# Use parallel embedding for large images
+cloak embed -i large.png -d secret.txt -o output.png --parallel
 ```
 
 ### Lossy and palette-based covers
@@ -106,7 +115,7 @@ cloak analyze -i suspicious.png
 # Analyze multiple images with a glob pattern
 cloak analyze -i "photos/*.png"
 
-# Check embedding capacity
+# Check embedding capacity (shows detailed breakdown)
 cloak capacity -i cover.png
 cloak capacity -i cover.png --bit-depth 2
 
@@ -132,7 +141,19 @@ make bench
 cargo bench --package cloak-core
 ```
 
-Criterion benchmarks cover embed/extract at multiple image sizes (64x64 to 512x512), all bit depths (1-4), randomized mode, and full end-to-end encrypt+embed/extract+decrypt cycles.
+Criterion benchmarks cover embed/extract at multiple image sizes (64x64 to 512x512), all bit depths (1-4), randomized mode, parallel embedding, and full end-to-end encrypt+embed/extract+decrypt cycles.
+
+## Fuzzing
+
+Fuzz targets require nightly Rust:
+
+```bash
+cargo +nightly fuzz run fuzz_extract -- -max_total_time=60
+cargo +nightly fuzz run fuzz_decrypt -- -max_total_time=60
+cargo +nightly fuzz run fuzz_analyze -- -max_total_time=60
+```
+
+Six fuzz targets cover: extract, embed, analyze, decrypt, format detection, and wire format parsing.
 
 ## Architecture
 
@@ -141,15 +162,17 @@ crates/
   cloak-core/    Core library: encryption, LSB engine, format codecs, steganalysis
   cloak-cli/     CLI binary (cloak)
   cloak-tui/     TUI analysis dashboard
+fuzz/            Cargo-fuzz targets
 ```
 
-`cloak-core` is the reusable library. All steganography operations go through three public functions: `embed()`, `extract()`, and `capacity()`. Internally, a unified `LsbCodec` handles all six image formats with a single implementation.
+`cloak-core` is the reusable library. All steganography operations go through the public API: `embed()`, `extract()`, `capacity()`, and `capacity_report()`. Internally, a unified `LsbCodec` handles all six image formats with a single implementation. GIF-specific steganalysis is available via `analysis::analyze_gif()`.
 
 ## Security Model
 
 - **Encryption is mandatory** — There is no way to embed unencrypted data. Every payload is wrapped with ChaCha20-Poly1305 authenticated encryption before embedding.
 - **Key derivation** — Argon2id derives the encryption key, the pixel permutation seed, and the length header mask from the passphrase, each with distinct salts.
 - **Authenticated encryption** — Poly1305 authentication tags detect tampering or wrong passphrases.
+- **Versioned wire format** — Version byte allows forward-compatible format evolution; unknown versions are rejected with a clear error.
 - **Anti-steganalysis** — Randomized pixel traversal, encrypted length headers, and block-aligned padding reduce statistical detectability.
 
 ## License

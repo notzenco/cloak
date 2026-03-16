@@ -27,14 +27,14 @@
 crates/
   cloak-core/           Core library
     src/
-      lib.rs            Public API: embed(), extract(), capacity()
-      crypto.rs         ChaCha20-Poly1305 encryption + Argon2id KDF
-      error.rs          CloakError enum
+      lib.rs            Public API: embed(), extract(), capacity(), capacity_report()
+      crypto.rs         ChaCha20-Poly1305 encryption, Argon2id KDF, wire versioning
+      error.rs          CloakError enum (incl. UnsupportedVersion)
       traits.rs         Encoder, Decoder, Capacity traits
-      analysis.rs       Steganalysis (chi-square, RS, sample pairs, entropy)
+      analysis.rs       Steganalysis (chi-square, RS, sample pairs, entropy, GIF analysis)
       formats/
         mod.rs          ImageFormat enum + unified LsbCodec
-        lsb.rs          LSB embedding/extraction engine
+        lsb.rs          LSB embedding/extraction engine (sequential + parallel)
         png.rs          PNG tests
         bmp.rs          BMP tests
         jpeg.rs         JPEG tests
@@ -42,12 +42,19 @@ crates/
         gif.rs          GIF tests
         tiff.rs         TIFF tests
     tests/
-      integration.rs    End-to-end integration tests
+      integration.rs            End-to-end integration tests
+      proptest_roundtrip.rs     Property-based roundtrip tests
+      proptest_analysis.rs      Property-based analysis invariant tests
+      proptest_capacity.rs      Property-based capacity tests
+      proptest_crypto.rs        Property-based crypto tests
+      proptest_format.rs        Property-based format detection tests
     benches/
-      steganography.rs  Criterion benchmarks
+      steganography.rs  Criterion benchmarks (incl. parallel)
   cloak-cli/            CLI binary
     src/main.rs         All CLI subcommands
   cloak-tui/            TUI analysis dashboard
+fuzz/
+  fuzz_targets/         Cargo-fuzz harnesses (extract, embed, analyze, decrypt, format, wire)
 ```
 
 ## Adding a New Image Format
@@ -70,4 +77,6 @@ No trait implementations needed — `LsbCodec` handles everything.
 - Follow `cargo fmt` and `cargo clippy -- -D warnings` conventions
 - Use `thiserror` for errors in `cloak-core`, `anyhow` in binaries
 - Add tests for new functionality
+- Consider adding proptest properties for new invariants in `tests/proptest_*.rs`
 - Keep the public API surface in `lib.rs` small — implementation details stay in submodules
+- Optional features (e.g., `parallel`) should degrade gracefully when disabled

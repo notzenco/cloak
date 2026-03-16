@@ -188,18 +188,13 @@ The low-level `LsbCodec` API is backwards compatible if `length_mask` is left at
 - `ImageFormat` has new `Gif` and `Tiff` variants.
 - `bits_to_u32()` and `bits_to_byte()` are removed (were public but only used internally).
 
-## Future Work
+## Future Work (v0.3.0)
 
-These items were identified but not implemented:
+All six items identified in v0.3.0 were implemented in v0.4.0:
 
-1. **Property-based testing** (`proptest`/`quickcheck`) — Roundtrip properties over arbitrary payloads, image sizes, and bit depths would catch edge cases. Good candidate for a focused testing sprint.
-
-2. **Cargo-fuzz targets** — The crypto decryption path and LSB extraction path both parse untrusted input. Fuzz targets for `crypto::decrypt()` and `extract_lsb()` would be valuable.
-
-3. **Capacity reporting with padding** — The `capacity` CLI command reports usable bytes after padding overhead, but doesn't explain why the number isn't a simple `pixels * channels * bits / 8`. A `--verbose` flag could show raw vs usable capacity.
-
-4. **Versioned wire format** — The crypto layer has a version byte, but the LSB layer (length header, padding) does not. A version field in the LSB header would allow future format evolution without breaking extraction.
-
-5. **Parallel embedding** — For large images, the pixel traversal loop could be parallelized with Rayon. The benchmarks added in this cycle provide the baseline for measuring improvement.
-
-6. **Additional analysis for new formats** — The steganalysis module works on any image the `image` crate can decode, but GIF's palette-based color model may warrant GIF-specific analysis methods.
+1. **Property-based testing** — Implemented with proptest (21 tests across 5 files).
+2. **Cargo-fuzz targets** — 6 fuzz harnesses covering extract, embed, analyze, decrypt, format detection, and wire format.
+3. **Capacity reporting with padding** — `CapacityBreakdown` struct and `capacity_report()` API with detailed CLI output.
+4. **Versioned wire format** — `WireVersion` enum, `detect_version()`, `UnsupportedVersion` error, decrypt dispatches by version.
+5. **Parallel embedding** — `embed_lsb_parallel()` with rayon, `--parallel` CLI flag, optional `parallel` feature.
+6. **GIF-specific analysis** — Palette anomaly detection, EzStego, Gifshuffle, palette chi-square.
