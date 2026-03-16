@@ -19,4 +19,14 @@ You should receive a response within 72 hours. We will work with you to understa
 
 | Version | Supported |
 |---------|-----------|
-| 0.1.x   | Yes       |
+| 0.3.x   | Yes       |
+| 0.2.x   | No        |
+| 0.1.x   | No        |
+
+## Security Architecture
+
+- **Mandatory encryption** — All embedded payloads are encrypted with ChaCha20-Poly1305 (AEAD). There is no unencrypted embedding path.
+- **Key derivation** — Argon2id with 16-byte random salts. Separate salts for encryption, pixel permutation, and length masking prevent cross-purpose key reuse.
+- **Authenticated encryption** — Poly1305 tags detect tampering and wrong passphrases.
+- **No plaintext leaks** — The 4-byte payload length header is XOR-masked with a passphrase-derived key. Payload is padded with random bytes to 64-byte block boundaries.
+- **Error handling** — All cryptographic and embedding operations return `Result` types. No `panic!`, `unwrap()`, or `expect()` in library code paths.
