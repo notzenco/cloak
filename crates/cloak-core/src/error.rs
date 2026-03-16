@@ -14,6 +14,9 @@ pub enum CloakError {
     #[error("invalid passphrase")]
     InvalidPassphrase,
 
+    #[error("passphrase required for randomized mode")]
+    MissingPassphrase,
+
     #[error("corrupted data: {0}")]
     CorruptedData(String),
 

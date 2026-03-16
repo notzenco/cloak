@@ -476,7 +476,10 @@ mod tests {
     #[test]
     fn analyze_stego_image() {
         let cover = make_test_png(64, 64);
-        let codec = crate::formats::png::PngCodec::default();
+        let codec = crate::formats::LsbCodec::new(
+            crate::formats::lsb::LsbParams::default(),
+            crate::formats::ImageFormat::Png,
+        );
         let payload = vec![0xAB; 500];
         let stego = crate::traits::Encoder::encode(&codec, &cover, &payload).unwrap();
 
@@ -537,7 +540,10 @@ mod tests {
     #[test]
     fn rs_analysis_stego_detects() {
         let cover = make_test_png(64, 64);
-        let codec = crate::formats::png::PngCodec::default();
+        let codec = crate::formats::LsbCodec::new(
+            crate::formats::lsb::LsbParams::default(),
+            crate::formats::ImageFormat::Png,
+        );
         // Embed near-max payload to maximize LSB modification
         let cap = crate::traits::Capacity::capacity(&codec, &cover).unwrap();
         let payload = vec![0xAB; cap];
@@ -561,7 +567,10 @@ mod tests {
     #[test]
     fn sample_pairs_stego() {
         let cover = make_test_png(64, 64);
-        let codec = crate::formats::png::PngCodec::default();
+        let codec = crate::formats::LsbCodec::new(
+            crate::formats::lsb::LsbParams::default(),
+            crate::formats::ImageFormat::Png,
+        );
         let cap = crate::traits::Capacity::capacity(&codec, &cover).unwrap();
         let payload = vec![0xAB; cap];
         let stego = crate::traits::Encoder::encode(&codec, &cover, &payload).unwrap();

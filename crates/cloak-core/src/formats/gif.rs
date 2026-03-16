@@ -9,7 +9,7 @@ mod tests {
     use crate::traits::{Capacity, Decoder, Encoder};
     use image::RgbaImage;
 
-    fn make_test_webp(width: u32, height: u32) -> Vec<u8> {
+    fn make_test_gif(width: u32, height: u32) -> Vec<u8> {
         let img = RgbaImage::from_fn(width, height, |x, y| {
             let r = ((x * 17 + y * 31) % 256) as u8;
             let g = ((x * 41 + y * 13) % 256) as u8;
@@ -17,51 +17,54 @@ mod tests {
             image::Rgba([r, g, b, 255])
         });
         let mut buf = Vec::new();
-        img.write_to(&mut Cursor::new(&mut buf), ImageFormat::WebP)
+        img.write_to(&mut Cursor::new(&mut buf), ImageFormat::Gif)
             .unwrap();
         buf
     }
 
     #[test]
-    fn webp_to_png_roundtrip() {
-        let cover = make_test_webp(64, 64);
-        let payload = b"WebP steganography!";
-        let webp_codec = LsbCodec::new(LsbParams::default(), CloakFormat::Png);
+    fn gif_to_png_roundtrip() {
+        let cover = make_test_gif(64, 64);
+        let payload = b"GIF steganography!";
+        let gif_codec = LsbCodec::new(LsbParams::default(), CloakFormat::Png);
         let png_codec = LsbCodec::new(LsbParams::default(), CloakFormat::Png);
-        let stego = webp_codec.encode(&cover, payload).unwrap();
+
+        let stego = gif_codec.encode(&cover, payload).unwrap();
         let extracted = png_codec.decode(&stego).unwrap();
+
         assert_eq!(extracted, payload);
     }
 
     #[test]
-    fn webp_capacity() {
-        let cover = make_test_webp(10, 10);
+    fn gif_capacity() {
+        let cover = make_test_gif(10, 10);
         let codec = LsbCodec::new(LsbParams::default(), CloakFormat::Png);
+
         let cap = codec.capacity(&cover).unwrap();
         assert_eq!(cap, 33);
     }
 
     #[test]
-    fn webp_format_detection() {
-        let cover = make_test_webp(4, 4);
-        assert_eq!(&cover[..4], b"RIFF");
-        assert_eq!(&cover[8..12], b"WEBP");
+    fn gif_format_detection() {
+        let cover = make_test_gif(4, 4);
         let format = CloakFormat::detect(&cover, None).unwrap();
-        assert_eq!(format, CloakFormat::WebP);
+        assert_eq!(format, CloakFormat::Gif);
     }
 
     #[test]
-    fn webp_extension_detection() {
-        let format = CloakFormat::detect(&[], Some("photo.webp")).unwrap();
-        assert_eq!(format, CloakFormat::WebP);
+    fn gif_extension_detection() {
+        let format = CloakFormat::detect(&[], Some("anim.gif")).unwrap();
+        assert_eq!(format, CloakFormat::Gif);
     }
 
     #[test]
     fn payload_too_large() {
-        let cover = make_test_webp(4, 4);
+        let cover = make_test_gif(4, 4);
         let codec = LsbCodec::new(LsbParams::default(), CloakFormat::Png);
+
         let cap = codec.capacity(&cover).unwrap();
         let payload = vec![0xAA; cap + 1];
+
         let result = codec.encode(&cover, &payload);
         assert!(matches!(
             result,
@@ -71,29 +74,35 @@ mod tests {
 
     #[test]
     fn max_capacity_payload() {
-        let cover = make_test_webp(32, 32);
-        let webp_codec = LsbCodec::new(LsbParams::default(), CloakFormat::Png);
+        let cover = make_test_gif(32, 32);
+        let gif_codec = LsbCodec::new(LsbParams::default(), CloakFormat::Png);
         let png_codec = LsbCodec::new(LsbParams::default(), CloakFormat::Png);
-        let cap = webp_codec.capacity(&cover).unwrap();
+
+        let cap = gif_codec.capacity(&cover).unwrap();
         let payload: Vec<u8> = (0..cap).map(|i| (i % 256) as u8).collect();
-        let stego = webp_codec.encode(&cover, &payload).unwrap();
+
+        let stego = gif_codec.encode(&cover, &payload).unwrap();
         let extracted = png_codec.decode(&stego).unwrap();
+
         assert_eq!(extracted, payload);
     }
 
     #[test]
     fn multi_bit_roundtrip() {
-        let cover = make_test_webp(32, 32);
+        let cover = make_test_gif(32, 32);
         let params = LsbParams {
             bit_depth: 2,
             ..Default::default()
         };
-        let webp_codec = LsbCodec::new(params.clone(), CloakFormat::Png);
+        let gif_codec = LsbCodec::new(params.clone(), CloakFormat::Png);
         let png_codec = LsbCodec::new(params, CloakFormat::Png);
-        let cap = webp_codec.capacity(&cover).unwrap();
+
+        let cap = gif_codec.capacity(&cover).unwrap();
         let payload: Vec<u8> = (0..cap.min(200)).map(|i| (i % 256) as u8).collect();
-        let stego = webp_codec.encode(&cover, &payload).unwrap();
+
+        let stego = gif_codec.encode(&cover, &payload).unwrap();
         let extracted = png_codec.decode(&stego).unwrap();
+
         assert_eq!(extracted, payload);
     }
 }

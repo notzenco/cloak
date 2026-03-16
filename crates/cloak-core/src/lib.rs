@@ -6,6 +6,7 @@ pub mod traits;
 
 pub use error::CloakError;
 pub use formats::ImageFormat;
+pub use formats::LsbCodec;
 pub use formats::lsb::LsbParams;
 pub use traits::{Capacity, Decoder, Encoder};
 
@@ -21,26 +22,28 @@ pub struct EmbedOptions {
 }
 
 impl EmbedOptions {
-    fn lsb_params(&self, passphrase: Option<&str>, pixel_count: usize) -> LsbParams {
+    fn lsb_params(&self, passphrase: Option<&str>, pixel_count: usize) -> Result<LsbParams> {
         let pixel_order = if self.randomized {
-            let passphrase = passphrase.expect("passphrase required for randomized mode");
+            let passphrase = passphrase.ok_or(CloakError::MissingPassphrase)?;
             formats::lsb::PixelOrder::Randomized(formats::lsb::generate_permutation(
                 passphrase,
                 pixel_count,
-            ))
+            )?)
         } else {
             formats::lsb::PixelOrder::Sequential
         };
-        LsbParams {
+        Ok(LsbParams {
             bit_depth: self.bit_depth.max(1),
             pixel_order,
-        }
+            ..Default::default()
+        })
     }
 
     fn lsb_params_no_rand(&self) -> LsbParams {
         LsbParams {
             bit_depth: self.bit_depth.max(1),
             pixel_order: formats::lsb::PixelOrder::Sequential,
+            ..Default::default()
         }
     }
 }
@@ -56,17 +59,14 @@ pub fn embed(
     let encrypted = crypto::encrypt(data, passphrase)?;
     let format = ImageFormat::detect(cover, path)?;
 
-    // Need pixel count for randomized mode
+    // Decode once; the codec reuses the decoded image directly.
     let img = image::load_from_memory(cover)?;
     let pixel_count = (img.width() * img.height()) as usize;
-    let params = options.lsb_params(Some(passphrase), pixel_count);
+    let mut params = options.lsb_params(Some(passphrase), pixel_count)?;
+    params.length_mask = formats::lsb::derive_length_mask(passphrase);
 
-    match format {
-        ImageFormat::Png => formats::png::PngCodec::new(params).encode(cover, &encrypted),
-        ImageFormat::Bmp => formats::bmp::BmpCodec::new(params).encode(cover, &encrypted),
-        ImageFormat::Jpeg => formats::jpeg::JpegCodec::new(params).encode(cover, &encrypted),
-        ImageFormat::WebP => formats::webp::WebpCodec::new(params).encode(cover, &encrypted),
-    }
+    let output_format = format.output_format();
+    formats::LsbCodec::new(params, output_format).encode_image(&img, &encrypted)
 }
 
 /// Extract and decrypt payload from a stego image.
@@ -78,19 +78,22 @@ pub fn extract(
 ) -> Result<Vec<u8>> {
     let format = ImageFormat::detect(stego, path)?;
 
-    let img = image::load_from_memory(stego)?;
-    let pixel_count = (img.width() * img.height()) as usize;
-    let params = options.lsb_params(Some(passphrase), pixel_count);
-
-    let encrypted = match format {
-        ImageFormat::Png => formats::png::PngCodec::new(params).decode(stego)?,
-        ImageFormat::Bmp => formats::bmp::BmpCodec::new(params).decode(stego)?,
-        ImageFormat::Jpeg | ImageFormat::WebP => {
+    match format {
+        ImageFormat::Jpeg | ImageFormat::WebP | ImageFormat::Gif => {
             return Err(CloakError::UnsupportedFormat(
                 "stego images from lossy covers are PNG — extract from the PNG output".into(),
             ));
         }
-    };
+        _ => {}
+    }
+
+    // Decode once; the codec reuses the decoded image directly.
+    let img = image::load_from_memory(stego)?;
+    let pixel_count = (img.width() * img.height()) as usize;
+    let mut params = options.lsb_params(Some(passphrase), pixel_count)?;
+    params.length_mask = formats::lsb::derive_length_mask(passphrase);
+
+    let encrypted = formats::LsbCodec::new(params, format).decode_image(&img)?;
     crypto::decrypt(&encrypted, passphrase)
 }
 
@@ -99,11 +102,6 @@ pub fn capacity(cover: &[u8], path: Option<&str>, options: &EmbedOptions) -> Res
     let format = ImageFormat::detect(cover, path)?;
     // Capacity doesn't need randomization
     let params = options.lsb_params_no_rand();
-    let raw_capacity = match format {
-        ImageFormat::Png => formats::png::PngCodec::new(params).capacity(cover)?,
-        ImageFormat::Bmp => formats::bmp::BmpCodec::new(params).capacity(cover)?,
-        ImageFormat::Jpeg => formats::jpeg::JpegCodec::new(params).capacity(cover)?,
-        ImageFormat::WebP => formats::webp::WebpCodec::new(params).capacity(cover)?,
-    };
+    let raw_capacity = formats::LsbCodec::new(params, format).capacity(cover)?;
     Ok(raw_capacity.saturating_sub(crypto::overhead()))
 }

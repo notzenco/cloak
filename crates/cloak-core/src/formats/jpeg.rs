@@ -1,54 +1,12 @@
-use std::io::Cursor;
-
-use image::ImageFormat;
-
-use super::lsb::{self, LsbParams};
-use crate::Result;
-use crate::traits::{Capacity, Encoder};
-
-/// JPEG cover image support.
-///
-/// JPEG is lossy, so the stego output is PNG (lossless) to preserve LSBs.
-#[derive(Default)]
-pub struct JpegCodec {
-    pub params: LsbParams,
-}
-
-impl JpegCodec {
-    pub fn new(params: LsbParams) -> Self {
-        Self { params }
-    }
-}
-
-impl Capacity for JpegCodec {
-    fn capacity(&self, cover: &[u8]) -> Result<usize> {
-        let img = image::load_from_memory(cover)?;
-        Ok(lsb::max_payload_bytes(
-            img.width(),
-            img.height(),
-            self.params.bit_depth,
-        ))
-    }
-}
-
-impl Encoder for JpegCodec {
-    fn encode(&self, cover: &[u8], payload: &[u8]) -> Result<Vec<u8>> {
-        let img = image::load_from_memory(cover)?;
-        let mut rgba = img.to_rgba8();
-
-        lsb::embed_lsb(&mut rgba, payload, &self.params)?;
-
-        let mut output = Vec::new();
-        rgba.write_to(&mut Cursor::new(&mut output), ImageFormat::Png)?;
-        Ok(output)
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::formats::png::PngCodec;
-    use crate::traits::Decoder;
+    use std::io::Cursor;
+
+    use image::ImageFormat;
+
+    use crate::formats::lsb::LsbParams;
+    use crate::formats::{ImageFormat as CloakFormat, LsbCodec};
+    use crate::traits::{Capacity, Decoder, Encoder};
     use image::RgbImage;
 
     fn make_test_jpeg(width: u32, height: u32) -> Vec<u8> {
@@ -68,20 +26,17 @@ mod tests {
     fn jpeg_to_png_roundtrip() {
         let cover = make_test_jpeg(64, 64);
         let payload = b"JPEG steganography!";
-        let jpeg_codec = JpegCodec::default();
-        let png_codec = PngCodec::default();
-
+        let jpeg_codec = LsbCodec::new(LsbParams::default(), CloakFormat::Png);
+        let png_codec = LsbCodec::new(LsbParams::default(), CloakFormat::Png);
         let stego = jpeg_codec.encode(&cover, payload).unwrap();
         let extracted = png_codec.decode(&stego).unwrap();
-
         assert_eq!(extracted, payload);
     }
 
     #[test]
     fn jpeg_capacity() {
         let cover = make_test_jpeg(10, 10);
-        let codec = JpegCodec::default();
-
+        let codec = LsbCodec::new(LsbParams::default(), CloakFormat::Png);
         let cap = codec.capacity(&cover).unwrap();
         assert_eq!(cap, 33);
     }
@@ -92,17 +47,56 @@ mod tests {
         assert_eq!(cover[0], 0xFF);
         assert_eq!(cover[1], 0xD8);
         assert_eq!(cover[2], 0xFF);
-
-        let format = crate::formats::ImageFormat::detect(&cover, None).unwrap();
-        assert_eq!(format, crate::formats::ImageFormat::Jpeg);
+        let format = CloakFormat::detect(&cover, None).unwrap();
+        assert_eq!(format, CloakFormat::Jpeg);
     }
 
     #[test]
     fn jpeg_extension_detection() {
-        let format = crate::formats::ImageFormat::detect(&[], Some("photo.jpg")).unwrap();
-        assert_eq!(format, crate::formats::ImageFormat::Jpeg);
+        let format = CloakFormat::detect(&[], Some("photo.jpg")).unwrap();
+        assert_eq!(format, CloakFormat::Jpeg);
+        let format = CloakFormat::detect(&[], Some("photo.jpeg")).unwrap();
+        assert_eq!(format, CloakFormat::Jpeg);
+    }
 
-        let format = crate::formats::ImageFormat::detect(&[], Some("photo.jpeg")).unwrap();
-        assert_eq!(format, crate::formats::ImageFormat::Jpeg);
+    #[test]
+    fn payload_too_large() {
+        let cover = make_test_jpeg(4, 4);
+        let codec = LsbCodec::new(LsbParams::default(), CloakFormat::Png);
+        let cap = codec.capacity(&cover).unwrap();
+        let payload = vec![0xAA; cap + 1];
+        let result = codec.encode(&cover, &payload);
+        assert!(matches!(
+            result,
+            Err(crate::CloakError::PayloadTooLarge { .. })
+        ));
+    }
+
+    #[test]
+    fn max_capacity_payload() {
+        let cover = make_test_jpeg(32, 32);
+        let jpeg_codec = LsbCodec::new(LsbParams::default(), CloakFormat::Png);
+        let png_codec = LsbCodec::new(LsbParams::default(), CloakFormat::Png);
+        let cap = jpeg_codec.capacity(&cover).unwrap();
+        let payload: Vec<u8> = (0..cap).map(|i| (i % 256) as u8).collect();
+        let stego = jpeg_codec.encode(&cover, &payload).unwrap();
+        let extracted = png_codec.decode(&stego).unwrap();
+        assert_eq!(extracted, payload);
+    }
+
+    #[test]
+    fn multi_bit_roundtrip() {
+        let cover = make_test_jpeg(32, 32);
+        let params = LsbParams {
+            bit_depth: 2,
+            ..Default::default()
+        };
+        let jpeg_codec = LsbCodec::new(params.clone(), CloakFormat::Png);
+        let png_codec = LsbCodec::new(params, CloakFormat::Png);
+        let cap = jpeg_codec.capacity(&cover).unwrap();
+        let payload: Vec<u8> = (0..cap.min(200)).map(|i| (i % 256) as u8).collect();
+        let stego = jpeg_codec.encode(&cover, &payload).unwrap();
+        let extracted = png_codec.decode(&stego).unwrap();
+        assert_eq!(extracted, payload);
     }
 }
