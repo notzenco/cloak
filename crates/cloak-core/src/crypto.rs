@@ -9,6 +9,31 @@ use crate::CloakError;
 
 const MAGIC: &[u8; 4] = b"CLOK";
 const VERSION: u8 = 1;
+
+/// Wire format version identifier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WireVersion {
+    V1 = 1,
+}
+
+/// Detect the wire format version from encrypted data.
+///
+/// Validates magic bytes and returns the version. Returns an error for
+/// unrecognised data or unsupported version numbers.
+pub fn detect_version(data: &[u8]) -> Result<WireVersion, CloakError> {
+    if data.len() < 5 {
+        return Err(CloakError::CorruptedData(
+            "data too short for header".into(),
+        ));
+    }
+    if &data[..4] != MAGIC {
+        return Err(CloakError::CorruptedData("invalid magic bytes".into()));
+    }
+    match data[4] {
+        1 => Ok(WireVersion::V1),
+        v => Err(CloakError::UnsupportedVersion(v)),
+    }
+}
 const SALT_LEN: usize = 16;
 const NONCE_LEN: usize = 12;
 const KEY_LEN: usize = 32;
@@ -53,21 +78,18 @@ pub fn encrypt(plaintext: &[u8], passphrase: &str) -> Result<Vec<u8>, CloakError
 
 /// Decrypt ciphertext that was encrypted with [`encrypt`].
 pub fn decrypt(data: &[u8], passphrase: &str) -> Result<Vec<u8>, CloakError> {
+    let version = detect_version(data)?;
+    match version {
+        WireVersion::V1 => decrypt_v1(data, passphrase),
+    }
+}
+
+/// V1 decryption: ChaCha20-Poly1305 with Argon2id key derivation.
+fn decrypt_v1(data: &[u8], passphrase: &str) -> Result<Vec<u8>, CloakError> {
     if data.len() < HEADER_LEN {
         return Err(CloakError::CorruptedData(
             "data too short for header".into(),
         ));
-    }
-
-    if &data[..4] != MAGIC {
-        return Err(CloakError::CorruptedData("invalid magic bytes".into()));
-    }
-
-    let version = data[4];
-    if version != VERSION {
-        return Err(CloakError::CorruptedData(format!(
-            "unsupported version: {version}"
-        )));
     }
 
     let salt = &data[5..5 + SALT_LEN];
@@ -153,5 +175,39 @@ mod tests {
         let plaintext = b"test";
         let encrypted = encrypt(plaintext, "pass").unwrap();
         assert_eq!(encrypted.len(), plaintext.len() + overhead());
+    }
+
+    #[test]
+    fn detect_version_valid_v1() {
+        let encrypted = encrypt(b"data", "pass").unwrap();
+        assert_eq!(detect_version(&encrypted).unwrap(), WireVersion::V1);
+    }
+
+    #[test]
+    fn detect_version_short_data() {
+        let result = detect_version(&[0u8; 3]);
+        assert!(matches!(result, Err(CloakError::CorruptedData(_))));
+    }
+
+    #[test]
+    fn detect_version_bad_magic() {
+        let result = detect_version(b"NOPE\x01extra");
+        assert!(matches!(result, Err(CloakError::CorruptedData(_))));
+    }
+
+    #[test]
+    fn decrypt_unsupported_version_2() {
+        let mut encrypted = encrypt(b"data", "pass").unwrap();
+        encrypted[4] = 2;
+        let result = decrypt(&encrypted, "pass");
+        assert!(matches!(result, Err(CloakError::UnsupportedVersion(2))));
+    }
+
+    #[test]
+    fn decrypt_unsupported_version_0() {
+        let mut encrypted = encrypt(b"data", "pass").unwrap();
+        encrypted[4] = 0;
+        let result = decrypt(&encrypted, "pass");
+        assert!(matches!(result, Err(CloakError::UnsupportedVersion(0))));
     }
 }

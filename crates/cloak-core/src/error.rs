@@ -20,6 +20,9 @@ pub enum CloakError {
     #[error("corrupted data: {0}")]
     CorruptedData(String),
 
+    #[error("unsupported wire format version: {0}")]
+    UnsupportedVersion(u8),
+
     #[error("image error: {0}")]
     Image(#[from] image::ImageError),
 }
